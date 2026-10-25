@@ -29,7 +29,7 @@ Android app 和這個網頁對同一組網址量測：
 ```
 v, app, id, type, t (ISO), ts (epoch ms), session,
 dev: { device_id, member, platform, model },
-net: { carrier, mcc, mnc, plan_5g, network_type, asn, as_org, colo },
+net: { carrier, mcc, mnc, plan_5g, rat_pref, network_type, asn, as_org, colo },
 loc: { lat, lon, acc, alt, alt_acc, speed, speed_src, speed_acc, heading, ts, fix_age_ms } | null
 ```
 
@@ -41,7 +41,7 @@ loc: { lat, lon, acc, alt, alt_acc, speed, speed_src, speed_acc, heading, ts, fi
 - `net`：ASN 或機房改變時記一筆
 - `session`：開始、停止、切到背景、回到前景、切換模式
 
-iPhone 讀不到的欄位一律是 `null`（例如 `network_type`、`speed_acc`）。Android app 沿用同一組欄位，再加上 cell 資訊。
+iPhone 讀不到的欄位一律是 `null`（例如 `speed_acc`）。`network_type` 只有在使用者設定「只用 4G」時記成 `LTE`（`rat_pref: lte_only`），否則是 `null`。Android app 沿用同一組欄位，再加上 cell 資訊。
 
 ## 檔案
 
