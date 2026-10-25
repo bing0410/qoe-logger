@@ -126,6 +126,9 @@ button:disabled{opacity:.5;cursor:default}
 .row{display:flex;flex-wrap:wrap;gap:8px}
 .row .secondary{flex:1 1 140px;min-height:44px;font-size:15px}
 
+.upload{display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+.upload .secondary{min-height:44px;font-size:15px}
+
 details.about{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
 details.about summary{cursor:pointer;font-weight:600}
 details.about ul{margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
@@ -217,11 +220,17 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
   </section>
   <ol class="log" id="log"><li><span class="empty">按「量一次」或「開始連續記錄」，結果會出現在這裡。</span></li></ol>
 
+  <div class="upload">
+    <div class="meter-row"><span>自動上傳</span><span class="num" id="upText">—</span></div>
+    <p class="small muted" id="upNote"></p>
+    <button class="secondary" id="btnUpload" type="button">立即上傳</button>
+  </div>
+
   <div class="row">
     <button class="secondary" id="btnJsonl" type="button">匯出 JSONL</button>
     <button class="secondary" id="btnCsv" type="button">匯出 CSV</button>
   </div>
-  <p class="small muted" id="exportNote">資料只存在這支手機的瀏覽器裡，請定期匯出傳到組內雲端。</p>
+  <p class="small muted" id="exportNote">匯出是備份用。設好自動上傳後，資料會自動送到組長的雲端硬碟。</p>
 
   <details class="about">
     <summary>量測方式（寫報告用）</summary>
@@ -300,6 +309,9 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
       <label class="field"><span>每月量測流量預算（MB）</span><input type="number" id="sBudget" min="100" max="100000" step="100" inputmode="numeric">
         <small>達到預算後網速測試會自動暫停，延遲照常。方案若有「用完降速」，降速後量到的網速不能用，預算要低於方案上限扣掉日常用量。</small>
       </label>
+      <label class="field"><span>隊伍密碼</span><input type="text" id="sKey" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <small>自動上傳用。用組長給的連結打開過就會自動填好。</small>
+      </label>
       <p class="banner bad" id="settingsErr" hidden></p>
       <button class="primary" type="submit">儲存設定</button>
       <div class="danger">
@@ -325,13 +337,15 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
 
 /* ---------- constants ---------- */
 const SERVER = 'https://speed.cloudflare.com';
-const APP = '0.1.2';
+const APP = '0.2.0';
 const SCHEMA = 1;
+const UPLOAD_URL = 'https://script.google.com/macros/s/AKfycbzZUNwIk6htWI2bfa-lGf69772NWyn49qkc0kS5WrBunp9lShw1z8Un2ekftJi2KRZ0/exec';
+const UPLOAD_BATCH = 400;
 const DEF = {
   rttIntervalS: 10, hotCount: 3, hotGapMs: 50, probeTimeoutMs: 8000,
   tputMode: 'bg', bgIntervalMin: 5, bgBytes: 5e6, bgMaxMs: 30000,
   denseIntervalS: 30, denseBytes: 20e6, denseMaxMs: 3000, rampMs: 500,
-  trackIntervalS: 5, budgetMB: 10000, metaIntervalMin: 5
+  trackIntervalS: 5, budgetMB: 10000, metaIntervalMin: 5, uploadIntervalMin: 5
 };
 const CARRIERS = {
   cht:   { name: '中華電信',   mcc: '466', mnc: '92' },
@@ -372,6 +386,16 @@ function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add
 /* ---------- persistent settings ---------- */
 let cfg = Object.assign({}, DEF, lsGet('qoe.cfg', {}));
 let P = lsGet('qoe.profile', null);   // { deviceId, member, carrier, plan5g, model }
+(function takeKeyFromLink() {
+  const m = /(?:^#|&)key=([\w-]{4,64})/.exec(location.hash);
+  if (m) { lsSet('qoe.key', m[1]); try { history.replaceState(null, '', location.pathname + location.search); } catch {} }
+})();
+const teamKey = () => lsGet('qoe.key', '');
+function connInfo() {   // Network Information API: Android Chrome only; null on iPhone
+  const c = navigator.connection;
+  if (!c) return null;
+  return { type: c.type ?? null, effective: c.effectiveType ?? null, downlink_mbps: c.downlink ?? null, rtt_ms: c.rtt ?? null, save_data: c.saveData ?? null };
+}
 
 const monthKey = () => { const d = new Date(); return `qoe.usage.${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
 let U = { key: monthKey(), bytes: lsGet(monthKey(), 0) };
@@ -386,7 +410,8 @@ const S = {
   lastNetEnd: 0, nextRtt: 0, nextTput: 0, nextMeta: 0,
   net: { asn: null, as_org: null, colo: null }, netOk: null,
   wake: null, count: 0, recent: [], logDirty: true,
-  budgetHit: false, mem: null, warnedHidden: false
+  budgetHit: false, mem: null, warnedHidden: false,
+  nextUpload: 0, up: { pending: 0, last: lsGet('qoe.upLast', null), err: null, done: lsGet('qoe.upCount', 0) }
 };
 
 /* ---------- IndexedDB (with in-memory fallback) ---------- */
@@ -444,6 +469,26 @@ function dbRecent(n) {
   })).catch(() => []);
 }
 async function dbClear() { try { await txp('readwrite', st => st.clear()); } catch {} if (S.mem) S.mem = []; }
+function dbAfter(ts, n) {   // records newer than ts, oldest first; never splits records that share a timestamp
+  return openDb().then(d => new Promise((res, rej) => {
+    const out = [];
+    const range = ts > 0 ? IDBKeyRange.lowerBound(ts, true) : null;
+    const req = d.transaction('records', 'readonly').objectStore('records').index('ts').openCursor(range);
+    req.onsuccess = () => {
+      const c = req.result;
+      if (c && (out.length < n || c.value.ts === out[out.length - 1].ts)) { out.push(c.value); c.continue(); }
+      else res(out);
+    };
+    req.onerror = () => rej(req.error);
+  }));
+}
+function dbCountAfter(ts) {
+  return openDb().then(d => new Promise((res, rej) => {
+    const idx = d.transaction('records', 'readonly').objectStore('records').index('ts');
+    const req = ts > 0 ? idx.count(IDBKeyRange.lowerBound(ts, true)) : idx.count();
+    req.onsuccess = () => res(req.result); req.onerror = () => rej(req.error);
+  })).catch(() => 0);
+}
 
 /* ---------- record envelope ---------- */
 function locSnap() {
@@ -457,7 +502,7 @@ function envelope(type, extra) {
     t: new Date().toISOString(), ts: Date.now(), session: S.sessionId,
     dev: { device_id: P.deviceId, member: P.member || null, platform: PLATFORM, model: P.model || null },
     net: { carrier: c.name, mcc: c.mcc, mnc: c.mnc, plan_5g: P.plan5g, rat_pref: P.ratPref || 'auto', network_type: P.ratPref === 'lte_only' ? 'LTE' : null,
-           asn: S.net.asn, as_org: S.net.as_org, colo: S.net.colo },
+           asn: S.net.asn, as_org: S.net.as_org, colo: S.net.colo, conn: connInfo() },
     loc: locSnap()
   }, extra);
 }
@@ -523,7 +568,7 @@ async function refreshMeta() {
   addUsage(1500);
   S.nextMeta = Date.now() + cfg.metaIntervalMin * 60000;
 }
-const wifiSuspect = () => S.net.asn === 1659 || /TANet|Academic|Education/i.test(S.net.as_org || '');
+const wifiSuspect = () => (navigator.connection && navigator.connection.type === 'wifi') || S.net.asn === 1659 || /TANet|Academic|Education/i.test(S.net.as_org || '');
 
 /* ---------- latency ---------- */
 function parseST(h) {
@@ -664,6 +709,33 @@ async function runTput(trigger, modeOverride) {
   return rec;
 }
 
+/* ---------- upload ---------- */
+async function runUpload(maxBatches) {
+  if (!UPLOAD_URL || !teamKey()) return;
+  S.task = 'upload'; render();
+  let wm = lsGet('qoe.upTs', 0);
+  try {
+    for (let b = 0; b < maxBatches; b++) {
+      const recs = await dbAfter(wm, UPLOAD_BATCH);
+      if (!recs.length) break;
+      const body = JSON.stringify({ key: teamKey(), app: APP, records: recs });
+      const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 60000);
+      let j = null;
+      try {
+        const r = await fetch(UPLOAD_URL, { method: 'POST', body, signal: ac.signal, headers: { 'Content-Type': 'text/plain;charset=utf-8' } });
+        j = await r.json();
+      } finally { clearTimeout(to); }
+      addUsage(body.length + 2000);
+      if (!j || !j.ok) { S.up.err = (j && j.err === 'bad_key') ? 'bad_key' : 'server'; break; }
+      wm = recs[recs.length - 1].ts; lsSet('qoe.upTs', wm);
+      S.up.done += recs.length; lsSet('qoe.upCount', S.up.done);
+      S.up.last = Date.now(); lsSet('qoe.upLast', S.up.last); S.up.err = null;
+    }
+  } catch { S.up.err = 'network'; }
+  S.up.pending = await dbCountAfter(wm);
+  S.nextUpload = Date.now() + (S.up.err ? 2 * 60000 : cfg.uploadIntervalMin * 60000);
+}
+
 /* ---------- scheduler ---------- */
 async function runTask(fn) {
   S.busy = true;
@@ -677,6 +749,7 @@ function tick() {
   if (now >= S.nextMeta) return runTask(refreshMeta);
   if (now >= S.nextRtt) return runTask(() => runRtt('auto'));
   if (now >= S.nextTput) return runTask(() => runTput('auto'));
+  if (now >= S.nextUpload && UPLOAD_URL && teamKey()) return runTask(() => runUpload(2));
 }
 
 async function start() {
@@ -705,7 +778,7 @@ async function once() {
     const t = await runTput('single', 'bg');
     if (!t && S.budgetHit) toast('本月量測流量已達預算，這次只量了延遲');
   } catch (e) { console.error(e); }
-  finally { S.busy = false; S.task = null; S.lastNetEnd = Date.now(); render(); }
+  finally { S.nextUpload = Math.min(S.nextUpload, Date.now() + 2000); S.busy = false; S.task = null; S.lastNetEnd = Date.now(); render(); }
 }
 
 /* ---------- wake lock & visibility ---------- */
@@ -729,6 +802,7 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 window.addEventListener('online', () => { S.nextMeta = 0; });
+try { if (navigator.connection) navigator.connection.addEventListener('change', () => { S.nextMeta = 0; render(); }); } catch {}
 
 /* ---------- rendering ---------- */
 function showBanner(text, kind) { const b = $('banner'); b.textContent = text; b.className = 'banner' + (kind === 'bad' ? ' bad' : ''); b.hidden = false; }
@@ -772,7 +846,7 @@ function logRow(rec) {
 }
 function renderNext() {
   const el = $('next'), now = Date.now();
-  const doing = { rtt: '正在量延遲…', tput: '正在量網速…', meta: '正在確認網路…', gps: '正在等 GPS 定位…' };
+  const doing = { rtt: '正在量延遲…', tput: '正在量網速…', meta: '正在確認網路…', gps: '正在等 GPS 定位…', upload: '正在上傳…' };
   if (S.task) { el.textContent = doing[S.task] || '量測中…'; return; }
   if (!S.running) {
     el.textContent = `按「開始連續記錄」後，延遲每 ${cfg.rttIntervalS} 秒、網速${cfg.tputMode === 'dense' ? '每 ' + cfg.denseIntervalS + ' 秒' : '每 ' + cfg.bgIntervalMin + ' 分鐘'}量一次。`;
@@ -804,7 +878,7 @@ function render() {
   // banners: priority geo denied > wifi > budget
   if (S.geoErr === 'denied') showBanner('定位被拒絕。iPhone：設定 → 隱私權與安全性 → 定位服務 → Safari 網站 → 選「使用 App 期間」並打開「精確位置」，再重新整理這頁。', 'bad');
   else if (f && f.acc > 200) showBanner(`定位精度只有 ±${Math.round(f.acc)} m，速度和位置都會不準。可能沒開「精確位置」：設定 → 隱私權與安全性 → 定位服務 → Safari 網站 → 打開「精確位置」。在室內也會比較不準，到戶外再看看。`, 'bad');
-  else if (wifiSuspect()) showBanner(`目前連到 ${S.net.as_org}，看起來是校園 Wi-Fi。請關掉 Wi-Fi 再量。`, 'warn');
+  else if (wifiSuspect()) showBanner(`目前看起來是用 Wi-Fi（${S.net.as_org || '未知網路'}），請關掉 Wi-Fi 再量。`, 'warn');
   else if (S.budgetHit) showBanner('本月量測流量已達預算，網速測試先暫停，延遲照常量。可在設定調整預算。', 'warn');
   else if (!S.mem) hideBanner();
 
@@ -843,6 +917,16 @@ function render() {
   $('usageText').textContent = `${fmtInt(used / 1e6)} / ${fmtInt(cfg.budgetMB)} MB`;
   const bar = $('usageBar'); bar.style.width = (frac * 100).toFixed(1) + '%';
   bar.className = frac >= 1 ? 'bad' : frac >= 0.8 ? 'warn' : '';
+
+  // upload
+  const hasKey = !!teamKey();
+  $('upText').textContent = !UPLOAD_URL ? '未設定' : !hasKey ? '未設定隊伍密碼' : `已上傳 ${fmtInt(S.up.done)} 筆 · 待上傳 ${fmtInt(S.up.pending)} 筆`;
+  $('upNote').textContent = !hasKey ? '請用組長給的連結打開一次（網址後面有 #key=…），或到設定填隊伍密碼。'
+    : S.up.err === 'bad_key' ? '隊伍密碼不對，請到設定檢查。'
+    : S.up.err ? '這次上傳失敗，有網路時會自動重試。'
+    : S.up.last ? `上次上傳 ${hhmmss(S.up.last)}。有網路時每 ${cfg.uploadIntervalMin} 分鐘自動上傳，不用手動匯出。`
+    : '有網路時會自動上傳，不用手動匯出。';
+  $('btnUpload').disabled = S.busy || !hasKey || !UPLOAD_URL;
 
   $('count').textContent = fmtInt(S.count);
   if (S.logDirty) {
@@ -891,8 +975,8 @@ async function doExport(kind) {
 }
 function renderExportNote() {
   const t = lsGet('qoe.lastExport', null);
-  $('exportNote').textContent = t ? `上次匯出：${new Date(t).toLocaleString('zh-TW', { hour12: false })}。資料只存在這支手機，請定期匯出。`
-    : '資料只存在這支手機的瀏覽器裡，請定期匯出傳到組內雲端。';
+  $('exportNote').textContent = t ? `上次匯出：${new Date(t).toLocaleString('zh-TW', { hour12: false })}。匯出是備份用。`
+    : '匯出是備份用。設好自動上傳後，資料會自動送到組長的雲端硬碟。';
 }
 
 /* ---------- forms ---------- */
@@ -920,7 +1004,7 @@ function openSettings() {
   carrierPicker($('settingsCarriers'), 'sCarrier', P.carrier);
   $('sPlan5g').value = String(P.plan5g); $('sRat').value = P.ratPref || 'auto'; $('sMember').value = P.member || ''; $('sModel').value = P.model || '';
   $('sRtt').value = cfg.rttIntervalS; $('sTrack').value = cfg.trackIntervalS; $('sBg').value = cfg.bgIntervalMin;
-  $('sDense').value = cfg.denseIntervalS; $('sBudget').value = cfg.budgetMB;
+  $('sDense').value = cfg.denseIntervalS; $('sBudget').value = cfg.budgetMB; $('sKey').value = teamKey();
   $('settingsErr').hidden = true; $('clearConfirm').hidden = true;
   $('settings').hidden = false;
 }
@@ -940,6 +1024,7 @@ $('settingsForm').addEventListener('submit', (e) => {
   Object.assign(P, { carrier: sel ? sel.value : P.carrier, plan5g: parsePlan($('sPlan5g').value), ratPref: $('sRat').value, member: $('sMember').value.trim(), model: $('sModel').value.trim() });
   lsSet('qoe.profile', P);
   if (S.running && P.ratPref !== prevRat) save('session', { event: 'rat', rat_pref: P.ratPref });
+  lsSet('qoe.key', $('sKey').value.trim()); S.up.err = null; S.nextUpload = Date.now() + 1000;
   if (usedBytes() < budgetBytes()) S.budgetHit = false;
   closeSettings(); toast('設定已儲存'); render();
 });
@@ -963,6 +1048,7 @@ document.querySelectorAll('input[name="mode"]').forEach(el => el.addEventListene
 }));
 $('btnJsonl').addEventListener('click', () => doExport('jsonl'));
 $('btnCsv').addEventListener('click', () => doExport('csv'));
+$('btnUpload').addEventListener('click', () => { if (S.busy) { toast('正在量測，請稍等'); return; } runTask(() => runUpload(20)); });
 
 /* ---------- boot ---------- */
 async function boot() {
@@ -970,9 +1056,13 @@ async function boot() {
   try { performance.setResourceTimingBufferSize && performance.setResourceTimingBufferSize(1000); } catch {}
   S.count = await dbCount();
   S.recent = await dbRecent(40); S.logDirty = true;
+  S.up.pending = await dbCountAfter(lsGet('qoe.upTs', 0)); S.nextUpload = Date.now() + 3000;
   renderExportNote();
   render();
   setInterval(tick, 500);
+  setInterval(() => {   // when not recording, upload in the background every few minutes
+    if (!S.running && !S.busy && !document.hidden && Date.now() >= S.nextUpload && UPLOAD_URL && teamKey()) runTask(() => runUpload(20));
+  }, 5000);
   refreshMeta().then(render);
 }
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
