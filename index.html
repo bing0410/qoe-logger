@@ -1,0 +1,971 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>網路體驗記錄器</title>
+<meta name="description" content="無線網路專題用的手機量測頁：GPS、HTTP 延遲與下載網速，對固定的 Cloudflare 台北機房量測。">
+<meta name="theme-color" content="#EDF0F3" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0E1318" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="QoE 記錄">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one phone-width column; status chips → two instrument readouts → controls → log. Numbers in mono, everything else in Plex Sans + system CJK. */
+:root{
+  --bg:#EDF0F3; --surface:#FFFFFF; --sunk:#E3E8ED; --ink:#141C24; --muted:#5A6572; --line:#D3DAE1;
+  --accent:#1F46C4; --accent-ink:#FFFFFF; --accent-soft:#DCE4FA;
+  --good:#1C7A52; --warn:#9A5E08; --bad:#B3361E; --bad-soft:#F7E1DB; --warn-soft:#F6EBD6;
+  --sans:"IBM Plex Sans","PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0E1318; --surface:#161D24; --sunk:#1D252E; --ink:#E3E8ED; --muted:#8F9BA8; --line:#28323D;
+    --accent:#7F9CFF; --accent-ink:#0B1020; --accent-soft:#1E2A4D;
+    --good:#4FC38D; --warn:#E3A84E; --bad:#F27C63; --bad-soft:#3A201B; --warn-soft:#352A17;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.wrap{max-width:560px;margin:0 auto;padding-block:14px 40px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  display:flex;flex-direction:column;gap:14px}
+h1,h2,h3{margin:0;text-wrap:balance}
+p{margin:0}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+
+/* header */
+.top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand h1{font-size:19px;font-weight:600;letter-spacing:.01em}
+.bars{display:flex;align-items:flex-end;gap:2px;height:20px;flex:none}
+.bars i{display:block;width:4px;border-radius:1px;background:var(--line)}
+.bars i:nth-child(1){height:5px}.bars i:nth-child(2){height:9px}.bars i:nth-child(3){height:14px}.bars i:nth-child(4){height:20px}
+.bars i.on{background:var(--accent)}
+.ghost{background:none;border:1px solid var(--line);border-radius:10px;padding:6px 12px;font-size:14px}
+
+/* banners & chips */
+.banner{border-radius:12px;padding:10px 12px;font-size:14px;background:var(--warn-soft);color:var(--ink);border:1px solid var(--line)}
+.banner.bad{background:var(--bad-soft)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface);border:1px solid var(--line);
+  border-radius:999px;padding:4px 10px;font-size:13px;white-space:nowrap}
+.chip b{font-weight:500}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--muted);flex:none}
+.dot.good{background:var(--good)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}
+
+/* readouts */
+.readouts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.readout{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px 10px;
+  display:flex;flex-direction:column;gap:2px;min-width:0}
+.readout h2{font-size:12px;font-weight:500;letter-spacing:.08em;color:var(--muted)}
+.big{display:flex;align-items:baseline;gap:6px;min-width:0}
+.big span{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:clamp(32px,10vw,44px);font-weight:500;line-height:1.1;letter-spacing:-.02em}
+.big small{font-size:13px;color:var(--muted)}
+.sub{font-size:12.5px;color:var(--muted);min-height:2.6em}
+.spark{width:100%;height:28px;color:var(--accent);display:block;margin-top:4px}
+
+/* controls */
+.controls{display:grid;grid-template-columns:2fr 1fr;gap:10px}
+.primary,.secondary{border-radius:12px;min-height:52px;font-size:16px;font-weight:600;border:1px solid transparent}
+.primary{background:var(--accent);color:var(--accent-ink)}
+.primary.stop{background:var(--surface);color:var(--bad);border-color:var(--bad)}
+.secondary{background:var(--surface);border-color:var(--line)}
+button:disabled{opacity:.5;cursor:default}
+.pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--bad);margin-right:8px;vertical-align:middle;animation:p 1.4s ease-in-out infinite}
+@keyframes p{50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.pulse{animation:none}}
+
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--sunk);border-radius:12px;padding:3px;gap:3px}
+.seg label{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+  border-radius:9px;padding:7px 6px;font-size:14px;cursor:pointer;min-width:0}
+.seg label small{font-size:11.5px;color:var(--muted)}
+.seg input{position:absolute;opacity:0;pointer-events:none}
+.seg label:has(input:checked){background:var(--surface);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg label:has(input:focus-visible){outline:2px solid var(--accent)}
+.next{font-size:13.5px;color:var(--muted);min-height:1.5em}
+
+.meter{display:flex;flex-direction:column;gap:6px}
+.meter-row{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.track{height:6px;background:var(--sunk);border-radius:3px;overflow:hidden}
+.track i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.track i.warn{background:var(--warn)}.track i.bad{background:var(--bad)}
+
+/* log */
+.section-h{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.section-h h2{font-size:15px;font-weight:600}
+.log{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.log li{display:grid;grid-template-columns:auto 1fr auto;gap:2px 12px;padding:9px 14px;border-top:1px solid var(--line);align-items:baseline}
+.log li:first-child{border-top:0}
+.log .t{font-family:var(--mono);font-size:12.5px;color:var(--muted)}
+.log .v{font-weight:500;min-width:0}
+.log .v .num{font-weight:600}
+.log .ctx{grid-column:2 / 4;font-size:12.5px;color:var(--muted);min-width:0;overflow-wrap:anywhere}
+.log .r{font-family:var(--mono);font-size:12.5px;color:var(--muted);text-align:right}
+.log .fail{color:var(--bad)}
+.log .empty{display:block;padding:16px 14px;color:var(--muted);font-size:14px}
+
+.row{display:flex;flex-wrap:wrap;gap:8px}
+.row .secondary{flex:1 1 140px;min-height:44px;font-size:15px}
+
+details.about{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
+details.about summary{cursor:pointer;font-weight:600}
+details.about ul{margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 5px;border-radius:5px;overflow-wrap:anywhere}
+
+/* panels */
+.panel{position:fixed;inset:0;z-index:20;background:var(--bg);overflow-y:auto;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+.form{display:flex;flex-direction:column;gap:16px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field>span{font-weight:500;font-size:14px}
+.field small{color:var(--muted);font-size:12.5px}
+.field input[type=text],.field input[type=number],.field select{
+  width:100%;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pick{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pick label{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer}
+.pick label small{color:var(--muted);font-family:var(--mono);font-size:12px}
+.pick input{position:absolute;opacity:0;pointer-events:none}
+.pick label:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.pick label:has(input:focus-visible){outline:2px solid var(--accent)}
+.checklist{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.danger{border-top:1px solid var(--line);padding-top:16px;display:flex;flex-direction:column;gap:10px}
+.danger .secondary{color:var(--bad);border-color:var(--bad);min-height:44px}
+.foot{font-size:12px;color:var(--muted);text-align:center}
+
+#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));z-index:30;
+  background:var(--ink);color:var(--bg);padding:9px 14px;border-radius:10px;font-size:14px;max-width:calc(100% - 32px);
+  opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+@media (max-width:360px){.readouts{grid-template-columns:1fr}.controls{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<div class="wrap" id="app" hidden>
+  <header class="top">
+    <div class="brand">
+      <span class="bars" id="bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+      <h1>網路體驗記錄器</h1>
+    </div>
+    <button class="ghost" id="btnSettings" type="button">設定</button>
+  </header>
+
+  <div class="banner" id="banner" role="status" hidden></div>
+
+  <div class="chips" aria-label="目前狀態">
+    <span class="chip" id="chipNet"><span class="dot"></span><span>網路 <b class="num">—</b></span></span>
+    <span class="chip" id="chipGps"><span class="dot"></span><span>GPS <b class="num">未啟用</b></span></span>
+    <span class="chip" id="chipSpeed"><span>速度 <b class="num">—</b></span></span>
+    <span class="chip" id="chipWake"><span class="dot"></span><span id="chipWakeText">螢幕會自動鎖定</span></span>
+  </div>
+
+  <div class="readouts">
+    <article class="readout" aria-live="polite">
+      <h2>延遲（熱）</h2>
+      <div class="big"><span id="rLat">—</span><small>ms</small></div>
+      <p class="sub" id="rLatSub">還沒量</p>
+      <svg class="spark" id="sparkLat" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+    </article>
+    <article class="readout" aria-live="polite">
+      <h2>網速（下載）</h2>
+      <div class="big"><span id="rTput">—</span><small>Mbps</small></div>
+      <p class="sub" id="rTputSub">還沒量</p>
+      <svg class="spark" id="sparkTput" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true"></svg>
+    </article>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="btnRun" type="button">開始連續記錄</button>
+    <button class="secondary" id="btnOnce" type="button">量一次</button>
+  </div>
+
+  <div class="seg" role="radiogroup" aria-label="網速模式">
+    <label><input type="radio" name="mode" id="modeBg" value="bg"><span>背景模式</span><small id="modeBgHint">5 MB／每 5 分鐘</small></label>
+    <label><input type="radio" name="mode" id="modeDense" value="dense"><span>密集模式</span><small id="modeDenseHint">≤20 MB／每 30 秒</small></label>
+  </div>
+
+  <p class="next" id="next"></p>
+
+  <div class="meter">
+    <div class="meter-row"><span>本月量測流量</span><span class="num" id="usageText">0 / 10,000 MB</span></div>
+    <div class="track"><i id="usageBar"></i></div>
+  </div>
+
+  <section class="section-h">
+    <h2>最近紀錄</h2>
+    <span class="small muted">已存 <span class="num" id="count">0</span> 筆</span>
+  </section>
+  <ol class="log" id="log"><li><span class="empty">按「量一次」或「開始連續記錄」，結果會出現在這裡。</span></li></ol>
+
+  <div class="row">
+    <button class="secondary" id="btnJsonl" type="button">匯出 JSONL</button>
+    <button class="secondary" id="btnCsv" type="button">匯出 CSV</button>
+  </div>
+  <p class="small muted" id="exportNote">資料只存在這支手機的瀏覽器裡，請定期匯出傳到組內雲端。</p>
+
+  <details class="about">
+    <summary>量測方式（寫報告用）</summary>
+    <ul>
+      <li><b>伺服器</b>：Cloudflare 測速端點 <code>speed.cloudflare.com</code>。Anycast 會連到最近的機房，每筆都記錄機房代碼（台灣應為 TPE）。Android app 用同一組網址。</li>
+      <li><b>延遲</b>：每組先送 1 個請求（冷，可能含手機從閒置被喚醒的時間），隔 50 ms 再連送 3 個（熱）。數值是瀏覽器量到的 HTTP 往返時間（Resource Timing 的 requestStart→responseStart），扣掉伺服器回報的處理時間（Server-Timing）。</li>
+      <li><b>網速</b>：背景模式下載 5 MB，算整體有效速率（含等待第一個位元組的時間，屬應用層體驗，不是鏈路容量）。密集模式最多 3 秒或 20 MB，扣掉前 0.5 秒或前 25% 資料（先到者）的 TCP 慢啟動，比較接近鏈路容量。</li>
+      <li><b>錯開</b>：延遲和網速不會同時跑，網速結束後至少隔 1 秒才量延遲。</li>
+      <li><b>速度</b>：瀏覽器回報的 GNSS 速度；沒有時用前後兩個定位點的距離 ÷ 時間推算（兩點精度都要在 30 m 內），紀錄裡會標明來源。</li>
+      <li><b>失敗也記</b>：逾時、斷線都會存成一筆失敗紀錄，這些是訊號死角的證據。</li>
+      <li><b>注意</b>：量測前請關 Wi-Fi；iPhone 鎖定螢幕或切到別的 app 後網頁會暫停。</li>
+    </ul>
+  </details>
+  <p class="foot num" id="ver"></p>
+</div>
+
+<!-- first-run setup -->
+<section class="panel" id="setup" hidden aria-labelledby="setupTitle">
+  <div class="wrap">
+    <header class="top"><div class="brand"><span class="bars" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><h1 id="setupTitle">第一次使用</h1></div></header>
+    <p>設定一次就好，之後每筆紀錄都會帶上這些資訊。</p>
+    <form class="form" id="setupForm" novalidate>
+      <div class="field">
+        <span>電信商</span>
+        <div class="pick" id="setupCarriers"></div>
+      </div>
+      <label class="field"><span>門號是 5G 方案嗎？</span>
+        <select id="fPlan5g"><option value="true">是，5G 方案</option><option value="false">不是，4G 方案</option><option value="null">不確定</option></select>
+        <small>瀏覽器讀不到現在連的是 4G 還是 5G，所以用方案來分。</small>
+      </label>
+      <div class="grid2">
+        <label class="field"><span>組員名稱</span><input type="text" id="fMember" autocomplete="nickname" placeholder="例如 小明"></label>
+        <label class="field"><span>手機型號</span><input type="text" id="fModel" placeholder="例如 iPhone 15"></label>
+      </div>
+      <div class="field">
+        <span>開始前</span>
+        <ul class="checklist">
+          <li>關掉 Wi-Fi，只用行動網路。</li>
+          <li>允許這個網站使用位置（「精確位置」要打開）。</li>
+          <li>量測時螢幕保持亮著。</li>
+        </ul>
+      </div>
+      <p class="banner bad" id="setupErr" hidden></p>
+      <button class="primary" type="submit">開始使用</button>
+    </form>
+  </div>
+</section>
+
+<!-- settings -->
+<section class="panel" id="settings" hidden aria-labelledby="settingsTitle">
+  <div class="wrap">
+    <header class="top"><h1 id="settingsTitle">設定</h1><button class="ghost" type="button" id="btnCloseSettings">關閉</button></header>
+    <form class="form" id="settingsForm" novalidate>
+      <div class="field"><span>電信商</span><div class="pick" id="settingsCarriers"></div></div>
+      <label class="field"><span>門號是 5G 方案嗎？</span>
+        <select id="sPlan5g"><option value="true">是，5G 方案</option><option value="false">不是，4G 方案</option><option value="null">不確定</option></select>
+      </label>
+      <div class="grid2">
+        <label class="field"><span>組員名稱</span><input type="text" id="sMember"></label>
+        <label class="field"><span>手機型號</span><input type="text" id="sModel"></label>
+      </div>
+      <div class="grid2">
+        <label class="field"><span>延遲間隔（秒）</span><input type="number" id="sRtt" min="5" max="120" step="1" inputmode="numeric"></label>
+        <label class="field"><span>位置紀錄間隔（秒）</span><input type="number" id="sTrack" min="1" max="60" step="1" inputmode="numeric"></label>
+        <label class="field"><span>背景網速間隔（分鐘）</span><input type="number" id="sBg" min="1" max="60" step="1" inputmode="numeric"></label>
+        <label class="field"><span>密集網速間隔（秒）</span><input type="number" id="sDense" min="15" max="300" step="1" inputmode="numeric"></label>
+      </div>
+      <label class="field"><span>每月量測流量預算（MB）</span><input type="number" id="sBudget" min="100" max="100000" step="100" inputmode="numeric">
+        <small>達到預算後網速測試會自動暫停，延遲照常。方案若有「用完降速」，降速後量到的網速不能用，預算要低於方案上限扣掉日常用量。</small>
+      </label>
+      <p class="banner bad" id="settingsErr" hidden></p>
+      <button class="primary" type="submit">儲存設定</button>
+      <div class="danger">
+        <button class="secondary" type="button" id="btnResetUsage">本月流量計歸零</button>
+        <button class="secondary" type="button" id="btnClear">刪除這支手機上的所有紀錄</button>
+        <div id="clearConfirm" hidden class="banner bad">
+          <p>確定刪除 <b class="num" id="clearCount">0</b> 筆紀錄？刪除後無法復原，建議先匯出。</p>
+          <div class="row" style="margin-top:10px">
+            <button class="secondary" type="button" id="btnClearYes">確定刪除</button>
+            <button class="secondary" type="button" id="btnClearNo">取消</button>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+</section>
+
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+'use strict';
+
+/* ---------- constants ---------- */
+const SERVER = 'https://speed.cloudflare.com';
+const APP = '0.1.0';
+const SCHEMA = 1;
+const DEF = {
+  rttIntervalS: 10, hotCount: 3, hotGapMs: 50, probeTimeoutMs: 8000,
+  tputMode: 'bg', bgIntervalMin: 5, bgBytes: 5e6, bgMaxMs: 30000,
+  denseIntervalS: 30, denseBytes: 20e6, denseMaxMs: 3000, rampMs: 500,
+  trackIntervalS: 5, budgetMB: 10000, metaIntervalMin: 5
+};
+const CARRIERS = {
+  cht:   { name: '中華電信',   mcc: '466', mnc: '92' },
+  twm:   { name: '台灣大哥大', mcc: '466', mnc: '97' },
+  fet:   { name: '遠傳電信',   mcc: '466', mnc: '01' },
+  other: { name: '其他',       mcc: null,  mnc: null }
+};
+const UA = navigator.userAgent;
+const PLATFORM = (/iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) ? 'ios-web'
+  : /Android/.test(UA) ? 'android-web' : 'desktop-web';
+
+/* ---------- small helpers ---------- */
+const $ = (id) => document.getElementById(id);
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const r1 = (x) => (x == null || !isFinite(x)) ? null : Math.round(x * 10) / 10;
+const r2 = (x) => (x == null || !isFinite(x)) ? null : Math.round(x * 100) / 100;
+const median = (a) => { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+const rnd = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+const fmtInt = (x) => Math.round(x).toLocaleString('en-US');
+function uuid() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16)); b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+  const h = [...b].map(x => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+function lsGet(k, f) { try { const v = localStorage.getItem(k); return v == null ? f : JSON.parse(v); } catch { return f; } }
+function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+function hav(lat1, lon1, lat2, lon2) {
+  const R = 6371000, t = Math.PI / 180, dl = (lat2 - lat1) * t, dn = (lon2 - lon1) * t;
+  const x = Math.sin(dl / 2) ** 2 + Math.cos(lat1 * t) * Math.cos(lat2 * t) * Math.sin(dn / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+const hhmmss = (ts) => new Date(ts).toLocaleTimeString('zh-TW', { hour12: false });
+function fmtDur(ms) { const s = Math.max(0, Math.ceil(ms / 1000)); return s < 60 ? `${s} 秒` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+let toastT = null;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 2600); }
+
+/* ---------- persistent settings ---------- */
+let cfg = Object.assign({}, DEF, lsGet('qoe.cfg', {}));
+let P = lsGet('qoe.profile', null);   // { deviceId, member, carrier, plan5g, model }
+
+const monthKey = () => { const d = new Date(); return `qoe.usage.${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+let U = { key: monthKey(), bytes: lsGet(monthKey(), 0) };
+function usedBytes() { const k = monthKey(); if (k !== U.key) U = { key: k, bytes: lsGet(k, 0) }; return U.bytes; }
+function addUsage(b) { usedBytes(); U.bytes += b; lsSet(U.key, U.bytes); }
+const budgetBytes = () => cfg.budgetMB * 1e6;
+
+/* ---------- runtime state ---------- */
+const S = {
+  running: false, busy: false, task: null, sessionId: null,
+  fix: null, geoWatch: null, geoErr: null, lastTrackTs: 0,
+  lastNetEnd: 0, nextRtt: 0, nextTput: 0, nextMeta: 0,
+  net: { asn: null, as_org: null, colo: null }, netOk: null,
+  wake: null, count: 0, recent: [], logDirty: true,
+  budgetHit: false, mem: null, warnedHidden: false
+};
+
+/* ---------- IndexedDB (with in-memory fallback) ---------- */
+let dbp = null;
+function openDb() {
+  if (dbp) return dbp;
+  dbp = new Promise((res, rej) => {
+    let req;
+    try { req = indexedDB.open('qoe-logger', 1); } catch (e) { rej(e); return; }
+    req.onupgradeneeded = () => { const s = req.result.createObjectStore('records', { keyPath: 'id' }); s.createIndex('ts', 'ts'); };
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+    req.onblocked = () => rej(new Error('blocked'));
+  });
+  return dbp;
+}
+function txp(mode, fn) {
+  return openDb().then(d => new Promise((res, rej) => {
+    const tx = d.transaction('records', mode); let out;
+    const r = fn(tx.objectStore('records'));
+    if (r) r.onsuccess = () => { out = r.result; };
+    tx.oncomplete = () => res(out);
+    tx.onerror = () => rej(tx.error);
+    tx.onabort = () => rej(tx.error);
+  }));
+}
+async function dbPut(rec) {
+  if (S.mem) { S.mem.push(rec); return; }
+  try { await txp('readwrite', st => st.put(rec)); }
+  catch {
+    S.mem = [rec];
+    showBanner('這個瀏覽器不能長期存資料（可能是私密瀏覽）。紀錄只留在這次開著的頁面，關掉前請先匯出。', 'bad');
+  }
+}
+async function dbAll() {
+  let rows = [];
+  try { rows = await txp('readonly', st => st.index('ts').getAll()) || []; } catch {}
+  return S.mem ? rows.concat(S.mem) : rows;
+}
+async function dbCount() {
+  let n = 0;
+  try { n = await txp('readonly', st => st.count()) || 0; } catch {}
+  return n + (S.mem ? S.mem.length : 0);
+}
+function dbRecent(n) {
+  return openDb().then(d => new Promise((res, rej) => {
+    const out = [];
+    const req = d.transaction('records', 'readonly').objectStore('records').index('ts').openCursor(null, 'prev');
+    req.onsuccess = () => {
+      const c = req.result;
+      if (c && out.length < n) { if (c.value.type === 'rtt' || c.value.type === 'tput') out.push(c.value); c.continue(); }
+      else res(out);
+    };
+    req.onerror = () => rej(req.error);
+  })).catch(() => []);
+}
+async function dbClear() { try { await txp('readwrite', st => st.clear()); } catch {} if (S.mem) S.mem = []; }
+
+/* ---------- record envelope ---------- */
+function locSnap() {
+  const f = S.fix; if (!f) return null;
+  return Object.assign({}, f, { fix_age_ms: Date.now() - f.ts });
+}
+function envelope(type, extra) {
+  const c = CARRIERS[P.carrier] || CARRIERS.other;
+  return Object.assign({
+    v: SCHEMA, app: APP, id: uuid(), type,
+    t: new Date().toISOString(), ts: Date.now(), session: S.sessionId,
+    dev: { device_id: P.deviceId, member: P.member || null, platform: PLATFORM, model: P.model || null },
+    net: { carrier: c.name, mcc: c.mcc, mnc: c.mnc, plan_5g: P.plan5g, network_type: null,
+           asn: S.net.asn, as_org: S.net.as_org, colo: S.net.colo },
+    loc: locSnap()
+  }, extra);
+}
+async function save(type, extra) {
+  const rec = envelope(type, extra);
+  await dbPut(rec);
+  S.count++;
+  if (type === 'rtt' || type === 'tput') { S.recent.unshift(rec); if (S.recent.length > 40) S.recent.length = 40; S.logDirty = true; }
+  render();
+  return rec;
+}
+
+/* ---------- geolocation ---------- */
+function startGeo() {
+  if (!('geolocation' in navigator)) { S.geoErr = 'unsupported'; render(); return; }
+  if (S.geoWatch != null) return;
+  S.geoErr = null;
+  S.geoWatch = navigator.geolocation.watchPosition(onFix, onGeoErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+}
+function stopGeo() { if (S.geoWatch != null) { navigator.geolocation.clearWatch(S.geoWatch); S.geoWatch = null; } }
+function onFix(p) {
+  const c = p.coords, ts = p.timestamp || Date.now();
+  let speed = (typeof c.speed === 'number' && isFinite(c.speed) && c.speed >= 0) ? c.speed : null;
+  let src = speed != null ? 'gnss' : null;
+  const prev = S.fix;
+  if (speed == null && prev && c.accuracy <= 30 && prev.acc <= 30) {
+    const dt = (ts - prev.ts) / 1000;
+    if (dt >= 1 && dt <= 30) { speed = hav(prev.lat, prev.lon, c.latitude, c.longitude) / dt; src = 'derived'; }
+  }
+  S.fix = {
+    lat: c.latitude, lon: c.longitude, acc: r1(c.accuracy),
+    alt: c.altitude != null ? r1(c.altitude) : null, alt_acc: c.altitudeAccuracy != null ? r1(c.altitudeAccuracy) : null,
+    speed: r2(speed), speed_src: src, speed_acc: null,
+    heading: (typeof c.heading === 'number' && isFinite(c.heading)) ? r1(c.heading) : null, ts
+  };
+  S.geoErr = null;
+  if (S.running && ts - S.lastTrackTs >= cfg.trackIntervalS * 1000) { S.lastTrackTs = ts; save('fix', {}); }
+  else render();
+}
+function onGeoErr(e) {
+  if (e.code === 1) { S.geoErr = 'denied'; stopGeo(); }
+  else if (e.code === 2) S.geoErr = 'unavailable';
+  else S.geoErr = 'timeout';
+  render();
+}
+
+/* ---------- network identity (ASN / Cloudflare colo) ---------- */
+async function refreshMeta() {
+  S.task = 'meta';
+  const ac = new AbortController(); const to = setTimeout(() => ac.abort(), 5000);
+  try {
+    const r = await fetch(`${SERVER}/meta`, { cache: 'no-store', signal: ac.signal, credentials: 'omit' });
+    const j = await r.json();
+    const net = {
+      asn: j.asn ?? null, as_org: j.asOrganization ?? null,
+      colo: (j.colo && typeof j.colo === 'object') ? (j.colo.iata ?? null) : (j.colo ?? null)
+    };
+    const changed = net.asn !== S.net.asn || net.colo !== S.net.colo;
+    S.net = net; S.netOk = true;
+    if (changed && P) await save('net', { meta: { http: j.httpProtocol ?? null } });
+  } catch { S.netOk = false; }
+  clearTimeout(to);
+  addUsage(1500);
+  S.nextMeta = Date.now() + cfg.metaIntervalMin * 60000;
+}
+const wifiSuspect = () => S.net.asn === 1659 || /TANet|Academic|Education/i.test(S.net.as_org || '');
+
+/* ---------- latency ---------- */
+function parseST(h) {
+  const o = { edge: null, worker: null, rtt_us: null, min_rtt_us: null, retrans: null };
+  if (!h) return o;
+  let m;
+  if ((m = /cfSpeedEdge;dur=([\d.]+)/.exec(h))) o.edge = +m[1];
+  if ((m = /cfSpeedWorker;dur=([\d.]+)/.exec(h))) o.worker = +m[1];
+  if (o.edge == null && o.worker == null && (m = /cfRequestDuration;dur=([\d.]+)/.exec(h))) { o.edge = 0; o.worker = +m[1]; }
+  if ((m = /[?&]rtt=(\d+)/.exec(h))) o.rtt_us = +m[1];
+  if ((m = /min_rtt=(\d+)/.exec(h))) o.min_rtt_us = +m[1];
+  if ((m = /retrans=(\d+)/.exec(h))) o.retrans = +m[1];
+  return o;
+}
+async function rtEntry(url) {
+  for (let i = 0; i < 4; i++) {
+    const list = performance.getEntriesByName(url);
+    if (list.length) return list[list.length - 1];
+    await sleep(15);
+  }
+  return null;
+}
+async function probe() {
+  const url = `${SERVER}/__down?bytes=0&r=${rnd()}`;
+  const ac = new AbortController(); const to = setTimeout(() => ac.abort(), cfg.probeTimeoutMs);
+  const t0 = performance.now();
+  try {
+    const r = await fetch(url, { cache: 'no-store', signal: ac.signal, credentials: 'omit' });
+    await r.arrayBuffer();
+    const wall = performance.now() - t0;
+    clearTimeout(to);
+    addUsage(800);
+    if (!r.ok) return { ok: false, err: 'http_' + r.status, wall_ms: r1(wall) };
+    const st = parseST(r.headers.get('server-timing'));
+    const e = await rtEntry(r.url || url);
+    let http = null, newConn = null, conn = null, proto = null;
+    if (e && e.requestStart > 0 && e.responseStart > 0) {
+      http = e.responseStart - e.requestStart;
+      newConn = e.connectEnd > e.connectStart;
+      conn = newConn ? e.connectEnd - e.connectStart : 0;
+      proto = e.nextHopProtocol || null;
+    }
+    const srv = (st.edge != null || st.worker != null) ? (st.edge || 0) + (st.worker || 0) : null;
+    const net = (http != null && srv != null) ? Math.max(0, http - srv) : null;
+    return {
+      ok: true, wall_ms: r1(wall), http_ms: r1(http), server_ms: r1(srv), net_ms: r1(net),
+      tcp_rtt_ms: st.rtt_us != null ? r1(st.rtt_us / 1000) : null,
+      tcp_min_rtt_ms: st.min_rtt_us != null ? r1(st.min_rtt_us / 1000) : null,
+      tcp_retrans: st.retrans, new_conn: newConn, connect_ms: r1(conn), proto
+    };
+  } catch (err) {
+    clearTimeout(to);
+    return { ok: false, err: err && err.name === 'AbortError' ? 'timeout' : 'network', wall_ms: r1(performance.now() - t0) };
+  }
+}
+const latOf = (p) => (p && p.ok) ? (p.net_ms ?? p.http_ms ?? p.wall_ms) : null;
+const basisOf = (p) => (!p || !p.ok) ? null : p.net_ms != null ? 'net' : p.http_ms != null ? 'http' : 'wall';
+
+async function runRtt(trigger) {
+  S.task = 'rtt'; render();
+  const idle = S.lastNetEnd ? Date.now() - S.lastNetEnd : null;
+  const cold = await probe();
+  const hot = [];
+  if (cold.ok) for (let i = 0; i < cfg.hotCount; i++) { await sleep(cfg.hotGapMs); hot.push(await probe()); }
+  const hv = hot.filter(h => h.ok).map(latOf);
+  try { performance.clearResourceTimings(); } catch {}
+  await save('rtt', {
+    trigger,
+    rtt: {
+      ok: cold.ok, err: cold.err || null, idle_gap_ms: idle,
+      cold_ms: latOf(cold), hot_median_ms: hv.length ? r1(median(hv)) : null, hot_ok: hv.length, hot_n: cfg.hotCount,
+      basis: basisOf(hot.find(h => h.ok) || cold), cold, hot
+    }
+  });
+  S.nextRtt = Date.now() + cfg.rttIntervalS * 1000;
+}
+
+/* ---------- throughput ---------- */
+async function runTput(trigger, modeOverride) {
+  const mode = modeOverride || cfg.tputMode;
+  const maxBytes = mode === 'dense' ? cfg.denseBytes : cfg.bgBytes;
+  const maxMs = mode === 'dense' ? cfg.denseMaxMs : cfg.bgMaxMs;
+  if (budgetBytes() - usedBytes() < maxBytes) { S.budgetHit = true; S.nextTput = Date.now() + 60000; render(); return null; }
+  S.task = 'tput'; render();
+  const url = `${SERVER}/__down?bytes=${maxBytes}&r=${rnd()}`;
+  const ac = new AbortController(); let cap = null;
+  const t0 = performance.now(); let tFirst = null, got = 0; const marks = [];
+  const timer = setTimeout(() => { cap = 'time_cap'; ac.abort(); }, maxMs);
+  let err = null;
+  try {
+    const r = await fetch(url, { cache: 'no-store', signal: ac.signal, credentials: 'omit' });
+    if (!r.ok) throw new Error('http_' + r.status);
+    if (r.body && r.body.getReader) {
+      const rd = r.body.getReader();
+      for (;;) {
+        const { done, value } = await rd.read();
+        if (done) break;
+        const t = performance.now(); if (tFirst === null) tFirst = t;
+        got += value.byteLength; marks.push([t, got]);
+      }
+    } else {
+      const b = await r.arrayBuffer(); const t = performance.now(); tFirst = t; got = b.byteLength; marks.push([t, got]);
+    }
+  } catch (e) {
+    if (!(e && e.name === 'AbortError' && cap)) err = (e && e.name === 'AbortError') ? 'abort' : (e && /^http_/.test(e.message) ? e.message : 'network');
+  }
+  clearTimeout(timer);
+  const tEnd = marks.length ? marks[marks.length - 1][0] : performance.now();
+  addUsage(got + 1000);
+  try { performance.clearResourceTimings(); } catch {}
+
+  const totalS = (tEnd - t0) / 1000;
+  const eff = (got > 0 && totalS > 0) ? got * 8 / totalS / 1e6 : null;
+  const bodyS = tFirst != null ? (tEnd - tFirst) / 1000 : null;
+  const body = (got > 0 && bodyS > 0.01) ? got * 8 / bodyS / 1e6 : null;
+  let steady = null, rule = null;
+  if (got > 0 && marks.length >= 3) {
+    const target = tFirst + cfg.rampMs, q = got * 0.25;
+    const idx = marks.findIndex(([t, c]) => t >= target || c >= q);
+    if (idx >= 0 && idx < marks.length - 1) {
+      rule = marks[idx][0] >= target ? 'skip_0.5s' : 'skip_25pct';
+      const [ta, ca] = marks[idx]; const dt = (tEnd - ta) / 1000;
+      if (dt >= 0.1) steady = (got - ca) * 8 / dt / 1e6;
+    }
+  }
+  const primary = mode === 'dense' ? (steady ?? body ?? eff) : eff;
+  const rec = await save('tput', {
+    trigger,
+    tput: {
+      mode, ok: got > 0 && !err, err, bytes: got, req_bytes: maxBytes, complete: got >= maxBytes, cap,
+      total_ms: r1(tEnd - t0), ttfb_ms: tFirst != null ? r1(tFirst - t0) : null,
+      mbps: r2(primary), mbps_effective: r2(eff), mbps_body: r2(body), mbps_steady: r2(steady), steady_rule: rule
+    }
+  });
+  const now = Date.now();
+  S.nextTput = now + (cfg.tputMode === 'dense' ? cfg.denseIntervalS * 1000 : cfg.bgIntervalMin * 60000);
+  S.nextRtt = Math.max(S.nextRtt, now + 1000);   // let the queue drain before the next latency probe
+  return rec;
+}
+
+/* ---------- scheduler ---------- */
+async function runTask(fn) {
+  S.busy = true;
+  try { await fn(); } catch (e) { console.error(e); }
+  finally { S.busy = false; S.task = null; S.lastNetEnd = Date.now(); render(); }
+}
+function tick() {
+  renderNext();
+  if (!S.running || S.busy || document.hidden) return;
+  const now = Date.now();
+  if (now >= S.nextMeta) return runTask(refreshMeta);
+  if (now >= S.nextRtt) return runTask(() => runRtt('auto'));
+  if (now >= S.nextTput) return runTask(() => runTput('auto'));
+}
+
+async function start() {
+  S.running = true; S.sessionId = uuid(); S.budgetHit = false;
+  startGeo(); wakeOn();
+  const now = Date.now();
+  S.nextMeta = now; S.nextRtt = now; S.nextTput = now + (cfg.tputMode === 'dense' ? 3000 : 8000);
+  await save('session', { event: 'start', mode: cfg.tputMode, cfg: { rtt_s: cfg.rttIntervalS, bg_min: cfg.bgIntervalMin, dense_s: cfg.denseIntervalS } });
+  render();
+}
+async function stop() {
+  S.running = false;
+  await save('session', { event: 'stop' });
+  wakeOff(); stopGeo(); render();
+}
+async function once() {
+  if (S.busy) { toast('正在量測，請稍等'); return; }
+  S.busy = true; render();
+  try {
+    if (!S.sessionId) S.sessionId = uuid();
+    startGeo();
+    if (!S.fix) { S.task = 'gps'; render(); for (let i = 0; i < 10 && !S.fix && !S.geoErr; i++) await sleep(500); }
+    if (S.netOk !== true) await refreshMeta();
+    await runRtt('single');
+    await sleep(1000);
+    const t = await runTput('single', 'bg');
+    if (!t && S.budgetHit) toast('本月量測流量已達預算，這次只量了延遲');
+  } catch (e) { console.error(e); }
+  finally { S.busy = false; S.task = null; S.lastNetEnd = Date.now(); render(); }
+}
+
+/* ---------- wake lock & visibility ---------- */
+async function wakeOn() {
+  try {
+    if ('wakeLock' in navigator && !S.wake) {
+      S.wake = await navigator.wakeLock.request('screen');
+      S.wake.addEventListener('release', () => { S.wake = null; render(); });
+    }
+  } catch { S.wake = null; }
+  render();
+}
+function wakeOff() { try { if (S.wake) S.wake.release(); } catch {} S.wake = null; }
+document.addEventListener('visibilitychange', () => {
+  if (!S.running) return;
+  if (document.visibilityState === 'visible') {
+    wakeOn(); save('session', { event: 'visible' });
+    S.nextRtt = Math.min(S.nextRtt, Date.now());
+  } else {
+    save('session', { event: 'hidden' });
+  }
+});
+window.addEventListener('online', () => { S.nextMeta = 0; });
+
+/* ---------- rendering ---------- */
+function showBanner(text, kind) { const b = $('banner'); b.textContent = text; b.className = 'banner' + (kind === 'bad' ? ' bad' : ''); b.hidden = false; }
+function hideBanner() { $('banner').hidden = true; }
+function setChip(id, cls, html) {
+  const el = $(id); const dot = el.querySelector('.dot');
+  if (dot) dot.className = 'dot' + (cls ? ' ' + cls : '');
+  el.querySelector('b').innerHTML = html;
+}
+function speedText(f) {
+  if (!f || f.speed == null) return '—';
+  const kmh = f.speed * 3.6;
+  return `${f.speed.toFixed(1)} m/s · ${kmh.toFixed(0)} km/h${f.speed_src === 'derived' ? '（推算）' : ''}`;
+}
+function spark(svg, vals) {
+  if (vals.length < 2) { svg.innerHTML = ''; return; }
+  const w = 120, h = 28, max = Math.max(...vals) * 1.15 || 1, step = w / (vals.length - 1);
+  const pts = vals.map((v, i) => [i * step, h - 2 - (v / max) * (h - 5)]);
+  const last = pts[pts.length - 1];
+  svg.innerHTML = `<polyline points="${pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ')}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`
+    + `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.6" fill="currentColor"/>`;
+}
+const errText = { timeout: '逾時', network: '連不上', abort: '中斷' };
+function logRow(rec) {
+  const loc = rec.loc;
+  const where = loc ? `±${Math.round(loc.acc)} m${loc.speed != null ? ' · ' + loc.speed.toFixed(1) + ' m/s' : ''}` : '無定位';
+  if (rec.type === 'rtt') {
+    const x = rec.rtt;
+    if (!x.ok) return `<li><span class="t">${hhmmss(rec.ts)}</span><span class="v fail">延遲 失敗（${errText[x.err] || x.err}）</span><span class="r">${where}</span></li>`;
+    const hot = x.hot_median_ms != null ? `<span class="num">${Math.round(x.hot_median_ms)}</span> ms` : '—';
+    const ctx = `冷 ${x.cold_ms != null ? Math.round(x.cold_ms) : '—'} ms · 熱 ${x.hot_ok}/${x.hot_n}${x.cold && x.cold.new_conn ? ' · 新連線' : ''}`;
+    return `<li><span class="t">${hhmmss(rec.ts)}</span><span class="v">延遲 ${hot}</span><span class="r">${where}</span><span class="ctx">${ctx}</span></li>`;
+  }
+  const x = rec.tput;
+  const label = x.mode === 'dense' ? '密集' : '背景';
+  if (!x.ok && !x.bytes) return `<li><span class="t">${hhmmss(rec.ts)}</span><span class="v fail">網速 失敗（${errText[x.err] || x.err}）</span><span class="r">${where}</span></li>`;
+  const mb = (x.bytes / 1e6).toFixed(x.bytes < 1e6 ? 2 : 1);
+  const ctx = `${label} · ${mb} MB · ${(x.total_ms / 1000).toFixed(1)} s${x.cap === 'time_cap' ? ' · 到時間上限' : ''}${x.err ? ' · ' + (errText[x.err] || x.err) : ''}`;
+  return `<li><span class="t">${hhmmss(rec.ts)}</span><span class="v">網速 <span class="num">${x.mbps != null ? x.mbps.toFixed(1) : '—'}</span> Mbps</span><span class="r">${where}</span><span class="ctx">${ctx}</span></li>`;
+}
+function renderNext() {
+  const el = $('next'), now = Date.now();
+  const doing = { rtt: '正在量延遲…', tput: '正在量網速…', meta: '正在確認網路…', gps: '正在等 GPS 定位…' };
+  if (S.task) { el.textContent = doing[S.task] || '量測中…'; return; }
+  if (!S.running) {
+    el.textContent = `按「開始連續記錄」後，延遲每 ${cfg.rttIntervalS} 秒、網速${cfg.tputMode === 'dense' ? '每 ' + cfg.denseIntervalS + ' 秒' : '每 ' + cfg.bgIntervalMin + ' 分鐘'}量一次。`;
+    return;
+  }
+  if (document.hidden) { el.textContent = '頁面在背景，量測暫停'; return; }
+  const t = S.budgetHit ? '網速已暫停（流量預算）' : `下次網速 ${fmtDur(S.nextTput - now)} 後`;
+  el.textContent = `下次延遲 ${fmtDur(S.nextRtt - now)} 後 · ${t}`;
+}
+function render() {
+  if (!P) return;
+  // network chip
+  if (S.netOk === false) setChip('chipNet', 'bad', '連不上');
+  else if (S.net.asn != null) setChip('chipNet', wifiSuspect() ? 'warn' : 'good', `AS${S.net.asn} · ${S.net.colo || '?'}`);
+  else setChip('chipNet', '', '—');
+  $('chipNet').title = S.net.as_org || '';
+  // gps chip
+  const f = S.fix;
+  if (S.geoErr === 'denied') setChip('chipGps', 'bad', '被拒');
+  else if (S.geoErr === 'unsupported') setChip('chipGps', 'bad', '不支援');
+  else if (f) setChip('chipGps', f.acc <= 10 ? 'good' : f.acc <= 30 ? 'warn' : 'bad', `±${Math.round(f.acc)} m`);
+  else setChip('chipGps', '', S.geoWatch != null ? '定位中' : '未啟用');
+  $('chipSpeed').querySelector('b').textContent = speedText(f);
+  // wake chip
+  const wd = $('chipWake').querySelector('.dot');
+  wd.className = 'dot' + (S.wake ? ' good' : S.running ? ' warn' : '');
+  $('chipWakeText').textContent = S.wake ? '螢幕常亮中' : (S.running ? '請保持螢幕亮著' : '螢幕會自動鎖定');
+
+  // banners: priority geo denied > wifi > budget
+  if (S.geoErr === 'denied') showBanner('定位被拒絕。iPhone：設定 → 隱私權與安全性 → 定位服務 → Safari 網站 → 選「使用 App 期間」並打開「精確位置」，再重新整理這頁。', 'bad');
+  else if (wifiSuspect()) showBanner(`目前連到 ${S.net.as_org}，看起來是校園 Wi-Fi。請關掉 Wi-Fi 再量。`, 'warn');
+  else if (S.budgetHit) showBanner('本月量測流量已達預算，網速測試先暫停，延遲照常量。可在設定調整預算。', 'warn');
+  else if (!S.mem) hideBanner();
+
+  // readouts
+  const lastR = S.recent.find(r => r.type === 'rtt'), lastT = S.recent.find(r => r.type === 'tput');
+  if (lastR) {
+    const x = lastR.rtt;
+    $('rLat').textContent = x.hot_median_ms != null ? Math.round(x.hot_median_ms) : '—';
+    $('rLatSub').textContent = x.ok ? `冷 ${x.cold_ms != null ? Math.round(x.cold_ms) : '—'} ms · ${hhmmss(lastR.ts)} · ${lastR.net.colo || 'Cloudflare'}` : `失敗（${errText[x.err] || x.err}）· ${hhmmss(lastR.ts)}`;
+  }
+  if (lastT) {
+    const x = lastT.tput;
+    $('rTput').textContent = x.mbps != null ? (x.mbps >= 100 ? Math.round(x.mbps) : x.mbps.toFixed(1)) : '—';
+    $('rTputSub').textContent = x.bytes ? `${x.mode === 'dense' ? '密集' : '背景'} · ${(x.bytes / 1e6).toFixed(1)} MB · ${hhmmss(lastT.ts)}` : `失敗 · ${hhmmss(lastT.ts)}`;
+  }
+  const chron = [...S.recent].reverse();
+  spark($('sparkLat'), chron.filter(r => r.type === 'rtt' && r.rtt.hot_median_ms != null).slice(-40).map(r => r.rtt.hot_median_ms));
+  spark($('sparkTput'), chron.filter(r => r.type === 'tput' && r.tput.mbps != null).slice(-20).map(r => r.tput.mbps));
+  // signal bars from latest latency
+  const lv = lastR ? (lastR.rtt.ok ? (lastR.rtt.hot_median_ms ?? lastR.rtt.cold_ms) : -1) : null;
+  const n = lv == null ? 0 : lv < 0 ? 0 : lv <= 50 ? 4 : lv <= 100 ? 3 : lv <= 200 ? 2 : 1;
+  [...$('bars').children].forEach((b, i) => b.classList.toggle('on', i < n));
+
+  // controls
+  const run = $('btnRun');
+  run.innerHTML = S.running ? '<span class="pulse" aria-hidden="true"></span>停止記錄' : '開始連續記錄';
+  run.classList.toggle('stop', S.running);
+  $('btnOnce').disabled = S.busy;
+  $('modeBg').checked = cfg.tputMode === 'bg';
+  $('modeDense').checked = cfg.tputMode === 'dense';
+  $('modeBgHint').textContent = `${cfg.bgBytes / 1e6} MB／每 ${cfg.bgIntervalMin} 分鐘`;
+  $('modeDenseHint').textContent = `≤${cfg.denseBytes / 1e6} MB／每 ${cfg.denseIntervalS} 秒`;
+
+  // usage
+  const used = usedBytes(), bud = budgetBytes(), frac = Math.min(1, used / bud);
+  $('usageText').textContent = `${fmtInt(used / 1e6)} / ${fmtInt(cfg.budgetMB)} MB`;
+  const bar = $('usageBar'); bar.style.width = (frac * 100).toFixed(1) + '%';
+  bar.className = frac >= 1 ? 'bad' : frac >= 0.8 ? 'warn' : '';
+
+  $('count').textContent = fmtInt(S.count);
+  if (S.logDirty) {
+    S.logDirty = false;
+    $('log').innerHTML = S.recent.length ? S.recent.slice(0, 15).map(logRow).join('') : '<li><span class="empty">按「量一次」或「開始連續記錄」，結果會出現在這裡。</span></li>';
+  }
+  renderNext();
+}
+
+/* ---------- export ---------- */
+function flat(o, p = '', out = {}) {
+  for (const [k, v] of Object.entries(o)) {
+    const key = p ? `${p}.${k}` : k;
+    if (Array.isArray(v)) v.forEach((x, i) => (x && typeof x === 'object') ? flat(x, `${key}.${i}`, out) : (out[`${key}.${i}`] = x));
+    else if (v && typeof v === 'object') flat(v, key, out);
+    else out[key] = v;
+  }
+  return out;
+}
+function toCsv(rows) {
+  const flats = rows.map(r => flat(r)); const cols = [];
+  const seen = new Set(); flats.forEach(f => Object.keys(f).forEach(k => { if (!seen.has(k)) { seen.add(k); cols.push(k); } }));
+  const esc = (v) => { if (v == null) return ''; const s = String(v); return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  return '﻿' + [cols.join(','), ...flats.map(f => cols.map(c => esc(f[c])).join(','))].join('\r\n');
+}
+function stamp() { const d = new Date(), z = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`; }
+async function deliver(text, name, type) {
+  const file = new File([text], name, { type });
+  if (navigator.canShare && navigator.share) {
+    try { if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return 'shared'; } }
+    catch (e) { if (e && e.name === 'AbortError') return 'cancel'; }
+  }
+  const url = URL.createObjectURL(file); const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 15000);
+  return 'downloaded';
+}
+async function doExport(kind) {
+  const rows = await dbAll();
+  if (!rows.length) { toast('還沒有紀錄可以匯出'); return; }
+  const who = (P.member || 'me').replace(/[^\w一-鿿-]/g, '');
+  const name = `qoe_${who}_${stamp()}.${kind === 'csv' ? 'csv' : 'jsonl'}`;
+  const text = kind === 'csv' ? toCsv(rows) : rows.map(r => JSON.stringify(r)).join('\n') + '\n';
+  const res = await deliver(text, name, kind === 'csv' ? 'text/csv' : 'text/plain');
+  if (res !== 'cancel') { lsSet('qoe.lastExport', Date.now()); toast(`已匯出 ${fmtInt(rows.length)} 筆`); renderExportNote(); }
+}
+function renderExportNote() {
+  const t = lsGet('qoe.lastExport', null);
+  $('exportNote').textContent = t ? `上次匯出：${new Date(t).toLocaleString('zh-TW', { hour12: false })}。資料只存在這支手機，請定期匯出。`
+    : '資料只存在這支手機的瀏覽器裡，請定期匯出傳到組內雲端。';
+}
+
+/* ---------- forms ---------- */
+function carrierPicker(container, name, selected) {
+  container.innerHTML = Object.entries(CARRIERS).map(([k, c]) =>
+    `<label><input type="radio" name="${name}" value="${k}"${k === selected ? ' checked' : ''}><span>${c.name}</span><small>${c.mcc ? c.mcc + '-' + c.mnc : '自行註記'}</small></label>`).join('');
+}
+const parsePlan = (v) => v === 'true' ? true : v === 'false' ? false : null;
+
+function openSetup() {
+  carrierPicker($('setupCarriers'), 'fCarrier', null);
+  $('setup').hidden = false; $('app').hidden = true;
+}
+$('setupForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const sel = document.querySelector('input[name="fCarrier"]:checked');
+  if (!sel) { $('setupErr').textContent = '請選電信商。'; $('setupErr').hidden = false; return; }
+  P = { deviceId: uuid(), carrier: sel.value, plan5g: parsePlan($('fPlan5g').value), member: $('fMember').value.trim(), model: $('fModel').value.trim() };
+  lsSet('qoe.profile', P);
+  $('setup').hidden = true; $('app').hidden = false;
+  boot();
+});
+
+function openSettings() {
+  carrierPicker($('settingsCarriers'), 'sCarrier', P.carrier);
+  $('sPlan5g').value = String(P.plan5g); $('sMember').value = P.member || ''; $('sModel').value = P.model || '';
+  $('sRtt').value = cfg.rttIntervalS; $('sTrack').value = cfg.trackIntervalS; $('sBg').value = cfg.bgIntervalMin;
+  $('sDense').value = cfg.denseIntervalS; $('sBudget').value = cfg.budgetMB;
+  $('settingsErr').hidden = true; $('clearConfirm').hidden = true;
+  $('settings').hidden = false;
+}
+function closeSettings() { $('settings').hidden = true; }
+$('btnSettings').addEventListener('click', openSettings);
+$('btnCloseSettings').addEventListener('click', closeSettings);
+$('settingsForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const num = (id, lo, hi) => { const v = Number($(id).value); return (Number.isFinite(v) && v >= lo && v <= hi) ? v : null; };
+  const vals = { rttIntervalS: num('sRtt', 5, 120), trackIntervalS: num('sTrack', 1, 60), bgIntervalMin: num('sBg', 1, 60),
+                 denseIntervalS: num('sDense', 15, 300), budgetMB: num('sBudget', 100, 100000) };
+  const bad = Object.entries(vals).filter(([, v]) => v == null);
+  if (bad.length) { $('settingsErr').textContent = '有欄位超出範圍：延遲 5–120 秒、位置 1–60 秒、背景網速 1–60 分鐘、密集網速 15–300 秒、預算 100–100000 MB。'; $('settingsErr').hidden = false; return; }
+  Object.assign(cfg, vals); lsSet('qoe.cfg', pickCfg());
+  const sel = document.querySelector('input[name="sCarrier"]:checked');
+  Object.assign(P, { carrier: sel ? sel.value : P.carrier, plan5g: parsePlan($('sPlan5g').value), member: $('sMember').value.trim(), model: $('sModel').value.trim() });
+  lsSet('qoe.profile', P);
+  if (usedBytes() < budgetBytes()) S.budgetHit = false;
+  closeSettings(); toast('設定已儲存'); render();
+});
+function pickCfg() { const o = {}; for (const k of ['rttIntervalS', 'trackIntervalS', 'bgIntervalMin', 'denseIntervalS', 'budgetMB', 'tputMode']) o[k] = cfg[k]; return o; }
+$('btnResetUsage').addEventListener('click', () => { U.bytes = 0; lsSet(U.key, 0); S.budgetHit = false; toast('本月流量計已歸零'); render(); });
+$('btnClear').addEventListener('click', async () => { $('clearCount').textContent = fmtInt(await dbCount()); $('clearConfirm').hidden = false; });
+$('btnClearNo').addEventListener('click', () => { $('clearConfirm').hidden = true; });
+$('btnClearYes').addEventListener('click', async () => {
+  await dbClear(); S.count = 0; S.recent = []; S.logDirty = true;
+  $('clearConfirm').hidden = true; closeSettings(); toast('紀錄已刪除'); render();
+});
+
+/* ---------- main controls ---------- */
+$('btnRun').addEventListener('click', () => { S.running ? stop() : start(); });
+$('btnOnce').addEventListener('click', once);
+document.querySelectorAll('input[name="mode"]').forEach(el => el.addEventListener('change', () => {
+  cfg.tputMode = el.value; lsSet('qoe.cfg', pickCfg());
+  if (S.running) { S.nextTput = Date.now() + (cfg.tputMode === 'dense' ? 3000 : cfg.bgIntervalMin * 60000); save('session', { event: 'mode', mode: cfg.tputMode }); }
+  if (cfg.tputMode === 'dense') toast('密集模式很吃流量，建議只在吃到飽或流量充足時使用');
+  render();
+}));
+$('btnJsonl').addEventListener('click', () => doExport('jsonl'));
+$('btnCsv').addEventListener('click', () => doExport('csv'));
+
+/* ---------- boot ---------- */
+async function boot() {
+  $('ver').textContent = `v${APP} · schema ${SCHEMA} · ${PLATFORM}`;
+  try { performance.setResourceTimingBufferSize && performance.setResourceTimingBufferSize(1000); } catch {}
+  S.count = await dbCount();
+  S.recent = await dbRecent(40); S.logDirty = true;
+  renderExportNote();
+  render();
+  setInterval(tick, 500);
+  refreshMeta().then(render);
+}
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if (!P) openSetup(); else { $('app').hidden = false; boot(); }
+})();
+</script>
+</body>
+</html>

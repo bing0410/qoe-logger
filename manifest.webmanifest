@@ -1,0 +1,15 @@
+{
+  "name": "網路體驗記錄器",
+  "short_name": "QoE 記錄",
+  "description": "無線網路專題的手機量測頁：GPS、HTTP 延遲與下載網速。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#EDF0F3",
+  "theme_color": "#EDF0F3",
+  "lang": "zh-Hant",
+  "icons": [
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
