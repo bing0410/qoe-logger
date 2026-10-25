@@ -325,7 +325,7 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
 
 /* ---------- constants ---------- */
 const SERVER = 'https://speed.cloudflare.com';
-const APP = '0.1.1';
+const APP = '0.1.2';
 const SCHEMA = 1;
 const DEF = {
   rttIntervalS: 10, hotCount: 3, hotGapMs: 50, probeTimeoutMs: 8000,
@@ -739,7 +739,8 @@ function setChip(id, cls, html) {
   el.querySelector('b').innerHTML = html;
 }
 function speedText(f) {
-  if (!f || f.speed == null) return '—';
+  if (!f) return '—';
+  if (f.speed == null) return f.acc > 30 ? '— 定位不夠準' : '— 沒在移動';
   const kmh = f.speed * 3.6;
   return `${f.speed.toFixed(1)} m/s · ${kmh.toFixed(0)} km/h${f.speed_src === 'derived' ? '（推算）' : ''}`;
 }
@@ -802,6 +803,7 @@ function render() {
 
   // banners: priority geo denied > wifi > budget
   if (S.geoErr === 'denied') showBanner('定位被拒絕。iPhone：設定 → 隱私權與安全性 → 定位服務 → Safari 網站 → 選「使用 App 期間」並打開「精確位置」，再重新整理這頁。', 'bad');
+  else if (f && f.acc > 200) showBanner(`定位精度只有 ±${Math.round(f.acc)} m，速度和位置都會不準。可能沒開「精確位置」：設定 → 隱私權與安全性 → 定位服務 → Safari 網站 → 打開「精確位置」。在室內也會比較不準，到戶外再看看。`, 'bad');
   else if (wifiSuspect()) showBanner(`目前連到 ${S.net.as_org}，看起來是校園 Wi-Fi。請關掉 Wi-Fi 再量。`, 'warn');
   else if (S.budgetHit) showBanner('本月量測流量已達預算，網速測試先暫停，延遲照常量。可在設定調整預算。', 'warn');
   else if (!S.mem) hideBanner();
