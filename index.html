@@ -252,6 +252,10 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
         <select id="fPlan5g"><option value="true">是，5G 方案</option><option value="false">不是，4G 方案</option><option value="null">不確定</option></select>
         <small>瀏覽器讀不到現在連的是 4G 還是 5G，所以用方案來分。</small>
       </label>
+      <label class="field"><span>手機的網路模式</span>
+        <select id="fRat"><option value="auto">自動（可用 5G）</option><option value="lte_only">只用 4G（LTE）</option></select>
+        <small>iPhone：設定 → 行動服務 → 行動數據選項 → 語音與數據。手機那邊切換後，這裡也要跟著改。</small>
+      </label>
       <div class="grid2">
         <label class="field"><span>組員名稱</span><input type="text" id="fMember" autocomplete="nickname" placeholder="例如 小明"></label>
         <label class="field"><span>手機型號</span><input type="text" id="fModel" placeholder="例如 iPhone 15"></label>
@@ -278,6 +282,10 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
       <div class="field"><span>電信商</span><div class="pick" id="settingsCarriers"></div></div>
       <label class="field"><span>門號是 5G 方案嗎？</span>
         <select id="sPlan5g"><option value="true">是，5G 方案</option><option value="false">不是，4G 方案</option><option value="null">不確定</option></select>
+      </label>
+      <label class="field"><span>手機的網路模式</span>
+        <select id="sRat"><option value="auto">自動（可用 5G）</option><option value="lte_only">只用 4G（LTE）</option></select>
+        <small>手機設定成只用 4G 時選這個，紀錄會標成 LTE。</small>
       </label>
       <div class="grid2">
         <label class="field"><span>組員名稱</span><input type="text" id="sMember"></label>
@@ -317,7 +325,7 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
 
 /* ---------- constants ---------- */
 const SERVER = 'https://speed.cloudflare.com';
-const APP = '0.1.0';
+const APP = '0.1.1';
 const SCHEMA = 1;
 const DEF = {
   rttIntervalS: 10, hotCount: 3, hotGapMs: 50, probeTimeoutMs: 8000,
@@ -448,7 +456,7 @@ function envelope(type, extra) {
     v: SCHEMA, app: APP, id: uuid(), type,
     t: new Date().toISOString(), ts: Date.now(), session: S.sessionId,
     dev: { device_id: P.deviceId, member: P.member || null, platform: PLATFORM, model: P.model || null },
-    net: { carrier: c.name, mcc: c.mcc, mnc: c.mnc, plan_5g: P.plan5g, network_type: null,
+    net: { carrier: c.name, mcc: c.mcc, mnc: c.mnc, plan_5g: P.plan5g, rat_pref: P.ratPref || 'auto', network_type: P.ratPref === 'lte_only' ? 'LTE' : null,
            asn: S.net.asn, as_org: S.net.as_org, colo: S.net.colo },
     loc: locSnap()
   }, extra);
@@ -777,7 +785,7 @@ function render() {
   if (!P) return;
   // network chip
   if (S.netOk === false) setChip('chipNet', 'bad', '連不上');
-  else if (S.net.asn != null) setChip('chipNet', wifiSuspect() ? 'warn' : 'good', `AS${S.net.asn} · ${S.net.colo || '?'}`);
+  else if (S.net.asn != null) setChip('chipNet', wifiSuspect() ? 'warn' : 'good', `AS${S.net.asn} · ${S.net.colo || '?'}${P.ratPref === 'lte_only' ? ' · 4G' : ''}`);
   else setChip('chipNet', '', '—');
   $('chipNet').title = S.net.as_org || '';
   // gps chip
@@ -900,7 +908,7 @@ $('setupForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const sel = document.querySelector('input[name="fCarrier"]:checked');
   if (!sel) { $('setupErr').textContent = '請選電信商。'; $('setupErr').hidden = false; return; }
-  P = { deviceId: uuid(), carrier: sel.value, plan5g: parsePlan($('fPlan5g').value), member: $('fMember').value.trim(), model: $('fModel').value.trim() };
+  P = { deviceId: uuid(), carrier: sel.value, plan5g: parsePlan($('fPlan5g').value), ratPref: $('fRat').value, member: $('fMember').value.trim(), model: $('fModel').value.trim() };
   lsSet('qoe.profile', P);
   $('setup').hidden = true; $('app').hidden = false;
   boot();
@@ -908,7 +916,7 @@ $('setupForm').addEventListener('submit', (e) => {
 
 function openSettings() {
   carrierPicker($('settingsCarriers'), 'sCarrier', P.carrier);
-  $('sPlan5g').value = String(P.plan5g); $('sMember').value = P.member || ''; $('sModel').value = P.model || '';
+  $('sPlan5g').value = String(P.plan5g); $('sRat').value = P.ratPref || 'auto'; $('sMember').value = P.member || ''; $('sModel').value = P.model || '';
   $('sRtt').value = cfg.rttIntervalS; $('sTrack').value = cfg.trackIntervalS; $('sBg').value = cfg.bgIntervalMin;
   $('sDense').value = cfg.denseIntervalS; $('sBudget').value = cfg.budgetMB;
   $('settingsErr').hidden = true; $('clearConfirm').hidden = true;
@@ -926,8 +934,10 @@ $('settingsForm').addEventListener('submit', (e) => {
   if (bad.length) { $('settingsErr').textContent = '有欄位超出範圍：延遲 5–120 秒、位置 1–60 秒、背景網速 1–60 分鐘、密集網速 15–300 秒、預算 100–100000 MB。'; $('settingsErr').hidden = false; return; }
   Object.assign(cfg, vals); lsSet('qoe.cfg', pickCfg());
   const sel = document.querySelector('input[name="sCarrier"]:checked');
-  Object.assign(P, { carrier: sel ? sel.value : P.carrier, plan5g: parsePlan($('sPlan5g').value), member: $('sMember').value.trim(), model: $('sModel').value.trim() });
+  const prevRat = P.ratPref || 'auto';
+  Object.assign(P, { carrier: sel ? sel.value : P.carrier, plan5g: parsePlan($('sPlan5g').value), ratPref: $('sRat').value, member: $('sMember').value.trim(), model: $('sModel').value.trim() });
   lsSet('qoe.profile', P);
+  if (S.running && P.ratPref !== prevRat) save('session', { event: 'rat', rat_pref: P.ratPref });
   if (usedBytes() < budgetBytes()) S.budgetHit = false;
   closeSettings(); toast('設定已儲存'); render();
 });
