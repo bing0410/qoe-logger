@@ -129,6 +129,9 @@ button:disabled{opacity:.5;cursor:default}
 .upload{display:flex;flex-direction:column;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
 .upload .secondary{min-height:44px;font-size:15px}
 
+.nsCard{display:flex;flex-direction:column;gap:2px;background:var(--accent-soft);border-radius:12px;padding:10px 12px;font-size:14px}
+.nsCard a{color:var(--accent);font-weight:500}
+
 details.about{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:12px 14px}
 details.about summary{cursor:pointer;font-weight:600}
 details.about ul{margin:10px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px}
@@ -174,6 +177,11 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
   </header>
 
   <div class="banner" id="banner" role="status" hidden></div>
+
+  <div class="nsCard" id="nsCard" hidden>
+    <b>Android：Network Survey 也開著嗎？</b>
+    <span>訊號強度和基地台編號要靠它記錄，網頁讀不到。<a href="https://github.com/chenfish666/wireless-network-project/blob/main/clients/networksurvey.md" target="_blank" rel="noopener">設定說明</a></span>
+  </div>
 
   <div class="chips" aria-label="目前狀態">
     <span class="chip" id="chipNet"><span class="dot"></span><span>網路 <b class="num">—</b></span></span>
@@ -251,8 +259,16 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
 <section class="panel" id="setup" hidden aria-labelledby="setupTitle">
   <div class="wrap">
     <header class="top"><div class="brand"><span class="bars" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span><h1 id="setupTitle">第一次使用</h1></div></header>
-    <p>設定一次就好，之後每筆紀錄都會帶上這些資訊。</p>
+    <p id="setupIntro">設定一次就好，之後每筆紀錄都會帶上這些資訊。</p>
     <form class="form" id="setupForm" novalidate>
+      <div class="field">
+        <span>這支手機是</span>
+        <div class="pick" id="setupPlatform">
+          <label><input type="radio" name="fPlatform" value="ios-web"><span>iPhone</span><small>Safari</small></label>
+          <label><input type="radio" name="fPlatform" value="android-web"><span>Android</span><small>Chrome + Network Survey</small></label>
+        </div>
+        <small id="platformHint"></small>
+      </div>
       <div class="field">
         <span>電信商</span>
         <div class="pick" id="setupCarriers"></div>
@@ -263,10 +279,10 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
       </label>
       <label class="field"><span>手機的網路模式</span>
         <select id="fRat"><option value="auto">自動（可用 5G）</option><option value="lte_only">只用 4G（LTE）</option></select>
-        <small>iPhone：設定 → 行動服務 → 行動數據選項 → 語音與數據。手機那邊切換後，這裡也要跟著改。</small>
+        <small id="ratHint">iPhone：設定 → 行動服務 → 行動數據選項 → 語音與數據。手機那邊切換後，這裡也要跟著改。</small>
       </label>
       <div class="grid2">
-        <label class="field"><span>組員名稱</span><input type="text" id="fMember" autocomplete="nickname" placeholder="例如 小明"></label>
+        <label class="field"><span>組員</span><select id="fMemberSel"></select><input type="text" id="fMember" autocomplete="nickname" placeholder="名字" hidden></label>
         <label class="field"><span>手機型號</span><input type="text" id="fModel" placeholder="例如 iPhone 15"></label>
       </div>
       <div class="field">
@@ -275,6 +291,7 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
           <li>關掉 Wi-Fi，只用行動網路。</li>
           <li>允許這個網站使用位置（「精確位置」要打開）。</li>
           <li>量測時螢幕保持亮著。</li>
+          <li id="nsItem" hidden>Android：Network Survey 也要開著記錄訊號（<a href="https://github.com/chenfish666/wireless-network-project/blob/main/clients/networksurvey.md" target="_blank" rel="noopener">設定說明</a>）。</li>
         </ul>
       </div>
       <p class="banner bad" id="setupErr" hidden></p>
@@ -288,6 +305,7 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
   <div class="wrap">
     <header class="top"><h1 id="settingsTitle">設定</h1><button class="ghost" type="button" id="btnCloseSettings">關閉</button></header>
     <form class="form" id="settingsForm" novalidate>
+      <label class="field"><span>這支手機是</span><select id="sPlatform"><option value="ios-web">iPhone</option><option value="android-web">Android</option></select></label>
       <div class="field"><span>電信商</span><div class="pick" id="settingsCarriers"></div></div>
       <label class="field"><span>門號是 5G 方案嗎？</span>
         <select id="sPlan5g"><option value="true">是，5G 方案</option><option value="false">不是，4G 方案</option><option value="null">不確定</option></select>
@@ -297,7 +315,7 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
         <small>手機設定成只用 4G 時選這個，紀錄會標成 LTE。</small>
       </label>
       <div class="grid2">
-        <label class="field"><span>組員名稱</span><input type="text" id="sMember"></label>
+        <label class="field"><span>組員</span><select id="sMemberSel"></select><input type="text" id="sMember" placeholder="名字" hidden></label>
         <label class="field"><span>手機型號</span><input type="text" id="sModel"></label>
       </div>
       <div class="grid2">
@@ -337,7 +355,7 @@ code{font-family:var(--mono);font-size:.92em;background:var(--sunk);padding:1px 
 
 /* ---------- constants ---------- */
 const SERVER = 'https://speed.cloudflare.com';
-const APP = '0.2.0';
+const APP = '0.3.0';
 const SCHEMA = 1;
 const UPLOAD_URL = 'https://script.google.com/macros/s/AKfycbzZUNwIk6htWI2bfa-lGf69772NWyn49qkc0kS5WrBunp9lShw1z8Un2ekftJi2KRZ0/exec';
 const UPLOAD_BATCH = 400;
@@ -353,8 +371,9 @@ const CARRIERS = {
   fet:   { name: '遠傳電信',   mcc: '466', mnc: '01' },
   other: { name: '其他',       mcc: null,  mnc: null }
 };
+const MEMBERS = ['陳昱菖', 'K', '錫叡', '陳宇謙', '林振揚', '蔡力陽'];   // names as in docs/division_of_labor.md
 const UA = navigator.userAgent;
-const PLATFORM = (/iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) ? 'ios-web'
+const DETECTED = (/iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) ? 'ios-web'
   : /Android/.test(UA) ? 'android-web' : 'desktop-web';
 
 /* ---------- small helpers ---------- */
@@ -393,7 +412,7 @@ let P = lsGet('qoe.profile', null);   // { deviceId, member, carrier, plan5g, mo
 const teamKey = () => lsGet('qoe.key', '');
 function connInfo() {   // Network Information API: Android Chrome only; null on iPhone
   const c = navigator.connection;
-  if (!c) return null;
+  if (!c || platformOf() === 'ios-web') return null;
   return { type: c.type ?? null, effective: c.effectiveType ?? null, downlink_mbps: c.downlink ?? null, rtt_ms: c.rtt ?? null, save_data: c.saveData ?? null };
 }
 
@@ -408,7 +427,7 @@ const S = {
   running: false, busy: false, task: null, sessionId: null,
   fix: null, geoWatch: null, geoErr: null, lastTrackTs: 0,
   lastNetEnd: 0, nextRtt: 0, nextTput: 0, nextMeta: 0,
-  net: { asn: null, as_org: null, colo: null }, netOk: null,
+  net: lsGet('qoe.net', { asn: null, as_org: null, colo: null, ts: null }), netOk: null,
   wake: null, count: 0, recent: [], logDirty: true,
   budgetHit: false, mem: null, warnedHidden: false,
   nextUpload: 0, up: { pending: 0, last: lsGet('qoe.upLast', null), err: null, done: lsGet('qoe.upCount', 0) }
@@ -500,9 +519,9 @@ function envelope(type, extra) {
   return Object.assign({
     v: SCHEMA, app: APP, id: uuid(), type,
     t: new Date().toISOString(), ts: Date.now(), session: S.sessionId,
-    dev: { device_id: P.deviceId, member: P.member || null, platform: PLATFORM, model: P.model || null },
-    net: { carrier: c.name, mcc: c.mcc, mnc: c.mnc, plan_5g: P.plan5g, rat_pref: P.ratPref || 'auto', network_type: P.ratPref === 'lte_only' ? 'LTE' : null,
-           asn: S.net.asn, as_org: S.net.as_org, colo: S.net.colo, conn: connInfo() },
+    dev: { device_id: P.deviceId, member: P.member || null, platform: platformOf(), detected: DETECTED, model: P.model || null },
+    net: { carrier: c.mcc ? c.mcc + '-' + c.mnc : null, carrier_name: c.name, mcc: c.mcc, mnc: c.mnc, plan_5g: P.plan5g, rat_pref: P.ratPref || 'auto', network_type: P.ratPref === 'lte_only' ? 'LTE' : null,
+           asn: S.net.asn, as_org: S.net.as_org, colo: S.net.colo, meta_ts: S.net.ts ?? null, conn: connInfo() },
     loc: locSnap()
   }, extra);
 }
@@ -558,10 +577,11 @@ async function refreshMeta() {
     const j = await r.json();
     const net = {
       asn: j.asn ?? null, as_org: j.asOrganization ?? null,
-      colo: (j.colo && typeof j.colo === 'object') ? (j.colo.iata ?? null) : (j.colo ?? null)
+      colo: (j.colo && typeof j.colo === 'object') ? (j.colo.iata ?? null) : (j.colo ?? null),
+      ts: Date.now()
     };
     const changed = net.asn !== S.net.asn || net.colo !== S.net.colo;
-    S.net = net; S.netOk = true;
+    S.net = net; S.netOk = true; lsSet('qoe.net', net);
     if (changed && P) await save('net', { meta: { http: j.httpProtocol ?? null } });
   } catch { S.netOk = false; }
   clearTimeout(to);
@@ -594,7 +614,7 @@ async function rtEntry(url) {
 async function probe() {
   const url = `${SERVER}/__down?bytes=0&r=${rnd()}`;
   const ac = new AbortController(); const to = setTimeout(() => ac.abort(), cfg.probeTimeoutMs);
-  const t0 = performance.now();
+  const t0 = performance.now(), tEpoch0 = Date.now();
   try {
     const r = await fetch(url, { cache: 'no-store', signal: ac.signal, credentials: 'omit' });
     await r.arrayBuffer();
@@ -603,6 +623,7 @@ async function probe() {
     addUsage(800);
     if (!r.ok) return { ok: false, err: 'http_' + r.status, wall_ms: r1(wall) };
     const st = parseST(r.headers.get('server-timing'));
+    const srvTs = Number(r.headers.get('cf-meta-request-time')) || null;   // server clock, epoch ms
     const e = await rtEntry(r.url || url);
     let http = null, newConn = null, conn = null, proto = null;
     if (e && e.requestStart > 0 && e.responseStart > 0) {
@@ -613,11 +634,13 @@ async function probe() {
     }
     const srv = (st.edge != null || st.worker != null) ? (st.edge || 0) + (st.worker || 0) : null;
     const net = (http != null && srv != null) ? Math.max(0, http - srv) : null;
+    let off = null;   // server clock minus phone clock, about ± half a round trip
+    if (srvTs) { const sendEpoch = (e && e.requestStart > 0) ? performance.timeOrigin + e.requestStart : tEpoch0; off = srvTs - (sendEpoch + (net ?? http ?? wall) / 2); }
     return {
       ok: true, wall_ms: r1(wall), http_ms: r1(http), server_ms: r1(srv), net_ms: r1(net),
       tcp_rtt_ms: st.rtt_us != null ? r1(st.rtt_us / 1000) : null,
       tcp_min_rtt_ms: st.min_rtt_us != null ? r1(st.min_rtt_us / 1000) : null,
-      tcp_retrans: st.retrans, new_conn: newConn, connect_ms: r1(conn), proto
+      tcp_retrans: st.retrans, new_conn: newConn, connect_ms: r1(conn), proto, clock_offset_ms: r1(off)
     };
   } catch (err) {
     clearTimeout(to);
@@ -625,6 +648,7 @@ async function probe() {
   }
 }
 const latOf = (p) => (p && p.ok) ? (p.net_ms ?? p.http_ms ?? p.wall_ms) : null;
+const medOff = (ps) => { const v = ps.filter(p => p && p.ok && p.clock_offset_ms != null).map(p => p.clock_offset_ms); return v.length ? r1(median(v)) : null; };
 const basisOf = (p) => (!p || !p.ok) ? null : p.net_ms != null ? 'net' : p.http_ms != null ? 'http' : 'wall';
 
 async function runRtt(trigger) {
@@ -640,7 +664,7 @@ async function runRtt(trigger) {
     rtt: {
       ok: cold.ok, err: cold.err || null, idle_gap_ms: idle,
       cold_ms: latOf(cold), hot_median_ms: hv.length ? r1(median(hv)) : null, hot_ok: hv.length, hot_n: cfg.hotCount,
-      basis: basisOf(hot.find(h => h.ok) || cold), cold, hot
+      basis: basisOf(hot.find(h => h.ok) || cold), clock_offset_ms: medOff([cold, ...hot]), cold, hot
     }
   });
   S.nextRtt = Date.now() + cfg.rttIntervalS * 1000;
@@ -700,7 +724,7 @@ async function runTput(trigger, modeOverride) {
     tput: {
       mode, ok: got > 0 && !err, err, bytes: got, req_bytes: maxBytes, complete: got >= maxBytes, cap,
       total_ms: r1(tEnd - t0), ttfb_ms: tFirst != null ? r1(tFirst - t0) : null,
-      mbps: r2(primary), mbps_effective: r2(eff), mbps_body: r2(body), mbps_steady: r2(steady), steady_rule: rule
+      mbps: r2(primary), mbps_effective: r2(eff), mbps_body: r2(body), mbps_steady: mode === 'dense' ? r2(steady) : null, steady_rule: mode === 'dense' ? rule : null
     }
   });
   const now = Date.now();
@@ -755,8 +779,9 @@ function tick() {
 async function start() {
   S.running = true; S.sessionId = uuid(); S.budgetHit = false;
   startGeo(); wakeOn();
+  if (S.netOk !== true && !S.busy) { S.busy = true; try { await refreshMeta(); } finally { S.busy = false; S.task = null; } }
   const now = Date.now();
-  S.nextMeta = now; S.nextRtt = now; S.nextTput = now + (cfg.tputMode === 'dense' ? 3000 : 8000);
+  S.nextMeta = Math.max(S.nextMeta, now); S.nextRtt = now; S.nextTput = now + (cfg.tputMode === 'dense' ? 3000 : 8000);
   await save('session', { event: 'start', mode: cfg.tputMode, cfg: { rtt_s: cfg.rttIntervalS, bg_min: cfg.bgIntervalMin, dense_s: cfg.denseIntervalS } });
   render();
 }
@@ -918,6 +943,8 @@ function render() {
   const bar = $('usageBar'); bar.style.width = (frac * 100).toFixed(1) + '%';
   bar.className = frac >= 1 ? 'bad' : frac >= 0.8 ? 'warn' : '';
 
+  $('nsCard').hidden = platformOf() !== 'android-web';
+  $('ver').textContent = `v${APP} · schema ${SCHEMA} · ${platformOf()}`;
   // upload
   const hasKey = !!teamKey();
   $('upText').textContent = !UPLOAD_URL ? '未設定' : !hasKey ? '未設定隊伍密碼' : `已上傳 ${fmtInt(S.up.done)} 筆 · 待上傳 ${fmtInt(S.up.pending)} 筆`;
@@ -986,15 +1013,41 @@ function carrierPicker(container, name, selected) {
 }
 const parsePlan = (v) => v === 'true' ? true : v === 'false' ? false : null;
 
-function openSetup() {
-  carrierPicker($('setupCarriers'), 'fCarrier', null);
+const platformOf = () => (P && P.platform) || DETECTED;
+function memberPicker(sel, input, current) {
+  const known = MEMBERS.includes(current);
+  sel.innerHTML = '<option value="">請選擇</option>' + MEMBERS.map(m => `<option value="${m}"${m === current ? ' selected' : ''}>${m}</option>`).join('') + `<option value="__other"${current && !known ? ' selected' : ''}>其他（自己填）</option>`;
+  input.value = current && !known ? current : '';
+  input.hidden = !(current && !known);
+  sel.onchange = () => { input.hidden = sel.value !== '__other'; if (!input.hidden) input.focus(); };
+}
+const memberOf = (sel, input) => sel.value === '__other' ? input.value.trim() : sel.value;
+function platformText(p) {
+  $('platformHint').textContent = p === 'android-web' ? 'Android 另外要開 Network Survey 記錄訊號，網頁讀不到訊號強度。' : p === 'ios-web' ? 'iPhone 只記位置、延遲和網速（iPhone 不開放訊號資料）。' : '';
+  $('ratHint').textContent = p === 'android-web' ? 'Android：設定 → 網路和網際網路 → SIM 卡 → 偏好的網路類型（三星：連接 → 行動網路 → 網路模式）。手機那邊切換後，這裡也要跟著改。' : 'iPhone：設定 → 行動服務 → 行動數據選項 → 語音與數據。手機那邊切換後，這裡也要跟著改。';
+  $('nsItem').hidden = p !== 'android-web';
+}
+function openSetup(prev) {
+  const p0 = (prev && prev.platform) || (DETECTED === 'desktop-web' ? '' : DETECTED);
+  document.querySelectorAll('input[name="fPlatform"]').forEach(r => { r.checked = r.value === p0; r.onchange = () => platformText(r.value); });
+  platformText(p0);
+  carrierPicker($('setupCarriers'), 'fCarrier', prev ? prev.carrier : null);
+  memberPicker($('fMemberSel'), $('fMember'), prev ? prev.member : '');
+  if (prev) {
+    $('fPlan5g').value = String(prev.plan5g); $('fRat').value = prev.ratPref || 'auto'; $('fModel').value = prev.model || '';
+    $('setupTitle').textContent = '確認一下設定';
+    $('setupIntro').textContent = '網頁更新了：請確認這支手機是 iPhone 還是 Android，並從名單選你的名字。之前的紀錄都還在。';
+  }
   $('setup').hidden = false; $('app').hidden = true;
 }
 $('setupForm').addEventListener('submit', (e) => {
   e.preventDefault();
+  const plat = document.querySelector('input[name="fPlatform"]:checked');
   const sel = document.querySelector('input[name="fCarrier"]:checked');
-  if (!sel) { $('setupErr').textContent = '請選電信商。'; $('setupErr').hidden = false; return; }
-  P = { deviceId: uuid(), carrier: sel.value, plan5g: parsePlan($('fPlan5g').value), ratPref: $('fRat').value, member: $('fMember').value.trim(), model: $('fModel').value.trim() };
+  const member = memberOf($('fMemberSel'), $('fMember'));
+  const err = !plat ? '請選這支手機是 iPhone 還是 Android。' : !sel ? '請選電信商。' : !member ? '請選你的名字。' : '';
+  if (err) { $('setupErr').textContent = err; $('setupErr').hidden = false; return; }
+  P = Object.assign({}, P || { deviceId: uuid() }, { platform: plat.value, carrier: sel.value, plan5g: parsePlan($('fPlan5g').value), ratPref: $('fRat').value, member, model: $('fModel').value.trim() });
   lsSet('qoe.profile', P);
   $('setup').hidden = true; $('app').hidden = false;
   boot();
@@ -1002,7 +1055,7 @@ $('setupForm').addEventListener('submit', (e) => {
 
 function openSettings() {
   carrierPicker($('settingsCarriers'), 'sCarrier', P.carrier);
-  $('sPlan5g').value = String(P.plan5g); $('sRat').value = P.ratPref || 'auto'; $('sMember').value = P.member || ''; $('sModel').value = P.model || '';
+  $('sPlatform').value = platformOf(); $('sPlan5g').value = String(P.plan5g); $('sRat').value = P.ratPref || 'auto'; memberPicker($('sMemberSel'), $('sMember'), P.member || ''); $('sModel').value = P.model || '';
   $('sRtt').value = cfg.rttIntervalS; $('sTrack').value = cfg.trackIntervalS; $('sBg').value = cfg.bgIntervalMin;
   $('sDense').value = cfg.denseIntervalS; $('sBudget').value = cfg.budgetMB; $('sKey').value = teamKey();
   $('settingsErr').hidden = true; $('clearConfirm').hidden = true;
@@ -1021,7 +1074,7 @@ $('settingsForm').addEventListener('submit', (e) => {
   Object.assign(cfg, vals); lsSet('qoe.cfg', pickCfg());
   const sel = document.querySelector('input[name="sCarrier"]:checked');
   const prevRat = P.ratPref || 'auto';
-  Object.assign(P, { carrier: sel ? sel.value : P.carrier, plan5g: parsePlan($('sPlan5g').value), ratPref: $('sRat').value, member: $('sMember').value.trim(), model: $('sModel').value.trim() });
+  Object.assign(P, { platform: $('sPlatform').value || P.platform, carrier: sel ? sel.value : P.carrier, plan5g: parsePlan($('sPlan5g').value), ratPref: $('sRat').value, member: memberOf($('sMemberSel'), $('sMember')) || P.member, model: $('sModel').value.trim() });
   lsSet('qoe.profile', P);
   if (S.running && P.ratPref !== prevRat) save('session', { event: 'rat', rat_pref: P.ratPref });
   lsSet('qoe.key', $('sKey').value.trim()); S.up.err = null; S.nextUpload = Date.now() + 1000;
@@ -1051,8 +1104,10 @@ $('btnCsv').addEventListener('click', () => doExport('csv'));
 $('btnUpload').addEventListener('click', () => { if (S.busy) { toast('正在量測，請稍等'); return; } runTask(() => runUpload(20)); });
 
 /* ---------- boot ---------- */
+let booted = false;
 async function boot() {
-  $('ver').textContent = `v${APP} · schema ${SCHEMA} · ${PLATFORM}`;
+  if (booted) { render(); return; }
+  booted = true;
   try { performance.setResourceTimingBufferSize && performance.setResourceTimingBufferSize(1000); } catch {}
   S.count = await dbCount();
   S.recent = await dbRecent(40); S.logDirty = true;
@@ -1066,7 +1121,7 @@ async function boot() {
   refreshMeta().then(render);
 }
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
-if (!P) openSetup(); else { $('app').hidden = false; boot(); }
+if (!P) openSetup(null); else if (!P.platform) openSetup(P); else { $('app').hidden = false; boot(); }
 })();
 </script>
 </body>
