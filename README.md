@@ -25,36 +25,40 @@
 ## 自動上傳
 
 - 網頁有網路時，每 5 分鐘把新紀錄批次上傳（每批最多 400 筆）到 Google Apps Script 端點（程式碼在 `server/Code.gs`）。
-- 原始紀錄：雲端硬碟 `qoe-logger-data` 資料夾，一批一個 JSONL 檔。
-- 延遲與網速摘要：同資料夾裡的「qoe-logger 量測總表」，一筆量測一列，iPhone 和 Android 混在同一張表，用「平台」欄區分。
+- 原始紀錄：團隊共用雲端硬碟的 `logs/qoe-logger-data/` 資料夾，一批一個 JSONL 檔。資料夾 ID 存在 Apps Script 的指令碼屬性 `FOLDER_ID`，不放在這個公開 repo。
+- 延遲與網速摘要：同資料夾裡的「qoe-logger 量測總表」，一筆量測一列，用「平台」欄區分 iPhone 和 Android。總表只給人看，分析只讀 JSONL。
 - 需要隊伍密碼：組長傳的連結（網址後面有 `#key=…`）打開一次就會記住，密碼不放在 repo 裡。
 - 網路斷掉時重送可能造成少數重複，分析時用 `id` 去重。
 
-## 資料格式（schema v1，JSONL 一行一筆）
+## 資料格式（v0.3.0，schema v1，JSONL 一行一筆）
 
 共同欄位：
 
 ```
 v, app, id, type, t (ISO), ts (epoch ms), session,
-dev: { device_id, member, platform, model },
-net: { carrier, mcc, mnc, plan_5g, rat_pref, network_type, asn, as_org, colo, conn },
+dev: { device_id, member, platform, detected, model },
+net: { carrier, carrier_name, mcc, mnc, plan_5g, rat_pref, network_type, asn, as_org, colo, meta_ts, conn },
 loc: { lat, lon, acc, alt, alt_acc, speed, speed_src, speed_acc, heading, ts, fix_age_ms } | null
 ```
 
 `type` 決定其餘欄位：
 
-- `rtt`：`rtt: { ok, err, idle_gap_ms, cold_ms, hot_median_ms, hot_ok, hot_n, basis, cold: {...}, hot: [{...}] }`
-- `tput`：`tput: { mode, ok, err, bytes, req_bytes, complete, cap, total_ms, ttfb_ms, mbps, mbps_effective, mbps_body, mbps_steady, steady_rule }`
+- `rtt`：`rtt: { ok, err, idle_gap_ms, cold_ms, hot_median_ms, hot_ok, hot_n, basis, clock_offset_ms, cold: {...}, hot: [{...}] }`。`clock_offset_ms` = 伺服器時間（回應標頭 `cf-meta-request-time`）減去（手機送出時間＋半個往返），用來檢查手機時鐘準不準。
+- `tput`：`tput: { mode, ok, err, bytes, req_bytes, complete, cap, total_ms, ttfb_ms, mbps, mbps_effective, mbps_body, mbps_steady, steady_rule }`。背景模式的 `mbps_steady`、`steady_rule` 一律是 `null`。
 - `fix`：只有位置（連續記錄時每 5 秒一筆）
 - `net`：ASN 或機房改變時記一筆
 - `session`：開始、停止、切到背景、回到前景、切換模式
 
 平台差異：
 
-- `platform`：`ios-web`、`android-web` 或 `desktop-web`。
+- `platform`：第一次使用時選 iPhone 或 Android（依瀏覽器預填），記成 `ios-web` 或 `android-web`；`detected` 是瀏覽器判斷的結果（另有 `desktop-web`）。
+- `member`：從組員名單選；`carrier` 是 `MCC-MNC`（例如 `466-92`），`carrier_name` 是電信商名稱。
+- `as_org`：開始記錄前會先查一次 `/meta`，每筆都帶 `as_org`；`meta_ts` 是最後一次查到的時間。iCloud 私密轉送開著時 ASN 會是 13335（Cloudflare）。
 - `net.conn`：只有 Android Chrome 有（Network Information API）：`type`（cellular／wifi）、`effective`（Chrome 估的 4g／3g）、`downlink_mbps`、`rtt_ms`。iPhone 是 `null`。`type` 是 `wifi` 時網頁會提醒關 Wi-Fi。
 - `network_type`：只有在使用者設定「只用 4G」時記成 `LTE`（`rat_pref: lte_only`），否則是 `null`。
-- 瀏覽器在兩個平台都讀不到 RSRP、PCI、基地台編號，這些要原生 app 才拿得到。
+- 瀏覽器在兩個平台都讀不到 RSRP、PCI、基地台編號。Android 另外用 Network Survey app 記錄，再用時間和網頁紀錄對齊。
+
+舊版（v0.2.x）的差異：`carrier` 是中文名稱（請用 `mcc`＋`mnc`）、`member` 是自由輸入、沒有 `detected`／`carrier_name`／`meta_ts`／`clock_offset_ms`，背景模式的 `mbps_steady` 可能有值。舊手機打開 v0.3.0 時會要求確認一次手機類型和名字。
 
 ## 檔案
 
