@@ -1,9 +1,14 @@
 /**
  * 網路體驗記錄器：上傳端點（Google Apps Script 網頁應用程式）
- * - 每批原始紀錄存成一個 JSONL 檔，放在雲端硬碟「qoe-logger-data」資料夾
- * - 延遲（rtt）與網速（tput）另外各寫一列到「qoe-logger 量測總表」
+ * - 每批原始紀錄存成一個 JSONL 檔，放進 Script Properties 裡 FOLDER_ID 指到的資料夾
+ *   （團隊用的是共用 Drive 的 logs/qoe-logger-data/）
+ * - 延遲（rtt）與網速（tput）另外各寫一列到同資料夾的「qoe-logger 量測總表」（只給人看，不是 pipeline 輸入）
  * 第一次使用：在編輯器執行 setup()，授權後到「執行作業記錄」看隊伍密碼與連結。
  * 部署：網頁應用程式，執行身分「我」，存取權「所有人」。
+ *
+ * 資料夾 ID 不寫進這個公開 repo：共用資料夾開著「知道連結就能編輯」，ID 就等於連結。
+ * 換資料夾：專案設定 → 指令碼屬性，新增 TARGET_FOLDER_ID = 新資料夾 ID，再執行 moveToTargetFolder()。
+ * logs/ 只能新增檔案，不能修改或刪除，所以這支程式不會刪除資料夾裡的任何檔案。
  */
 const FOLDER_NAME = 'qoe-logger-data';
 const SHEET_NAME = 'qoe-logger 量測總表';
@@ -21,6 +26,34 @@ function setup() {
   console.log('TEAM_KEY=' + props.getProperty('TEAM_KEY'));
   console.log('FOLDER=' + folder.getUrl());
   console.log('SHEET=' + sheet.getParent().getUrl());
+}
+
+/**
+ * 把目前資料夾裡的所有檔案（JSONL 批次與量測總表）移到 TARGET_FOLDER_ID，之後的上傳都寫進新資料夾。
+ * 舊資料夾留空、不刪除。只移動，不複製也不改檔案內容。
+ */
+function moveToTargetFolder() {
+  const props = PropertiesService.getScriptProperties();
+  const targetId = props.getProperty('TARGET_FOLDER_ID');
+  if (!targetId) throw new Error('先在「專案設定 → 指令碼屬性」新增 TARGET_FOLDER_ID');
+  const target = DriveApp.getFolderById(targetId);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const oldId = props.getProperty('FOLDER_ID');
+    let moved = 0;
+    if (oldId && oldId !== targetId) {
+      const it = DriveApp.getFolderById(oldId).getFiles();
+      while (it.hasNext()) { it.next().moveTo(target); moved++; }
+    }
+    props.setProperty('FOLDER_ID', targetId);
+    props.deleteProperty('TARGET_FOLDER_ID');
+    let left = 0;
+    if (oldId && oldId !== targetId) { const it2 = DriveApp.getFolderById(oldId).getFiles(); while (it2.hasNext()) { it2.next(); left++; } }
+    console.log('moved=' + moved + ', left_in_old=' + left + ', target=' + target.getName());
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function doGet() {
@@ -62,29 +95,11 @@ function doPost(e) {
   }
 }
 
-/** 刪掉組員名稱為 _test 的測試資料（檔案移到垃圾桶，可以復原）。 */
-function cleanupTest() {
-  const folder = getFolder_();
-  const it = folder.getFiles();
-  let files = 0;
-  while (it.hasNext()) {
-    const f = it.next();
-    if (f.getName().indexOf('__test_') >= 0) { f.setTrashed(true); files++; }
-  }
-  const sh = getSheet_(folder);
-  const vals = sh.getDataRange().getValues();
-  let rows = 0;
-  for (let i = vals.length - 1; i >= 1; i--) {
-    if (vals[i][1] === '_test') { sh.deleteRow(i + 1); rows++; }
-  }
-  console.log('trashed files=' + files + ', deleted rows=' + rows);
-}
-
 function row_(r) {
   const d = r.dev || {}, n = r.net || {}, l = r.loc || {}, x = r.rtt || {}, t = r.tput || {};
   return [
     Utilities.formatDate(new Date(r.ts), 'Asia/Taipei', 'yyyy-MM-dd HH:mm:ss'),
-    d.member || '', d.platform || '', d.model || '', n.carrier || '', n.rat_pref || '', v_(n.asn), n.colo || '', r.type,
+    d.member || '', d.platform || '', d.model || '', n.carrier_name || n.carrier || '', n.rat_pref || '', v_(n.asn), n.colo || '', r.type,
     v_(l.lat), v_(l.lon), v_(l.acc), v_(l.speed), l.speed_src || '',
     v_(x.hot_median_ms), v_(x.cold_ms), r.type === 'rtt' ? !!x.ok : '',
     v_(t.mbps), t.mode || '', r.type === 'tput' ? !!t.ok : '', v_(t.bytes),
